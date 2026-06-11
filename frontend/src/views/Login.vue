@@ -160,22 +160,24 @@ async function handleLogin() {
     if (valid) {
       loading.value = true;
 
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      try {
+        const result = await authStore.login(
+          form.username,
+          form.password,
+          form.rememberMe
+        );
 
-      const success = authStore.login(
-        form.username,
-        form.password,
-        form.rememberMe,
-      );
-
-      if (success) {
-        ElMessage.success("登录成功");
-        router.push("/documents");
-      } else {
-        ElMessage.error("用户名或密码错误");
+        if (result.success) {
+          ElMessage.success(result.message);
+          router.push("/documents");
+        } else {
+          ElMessage.error(result.message);
+        }
+      } catch (error) {
+        ElMessage.error(error.message || "登录失败");
+      } finally {
+        loading.value = false;
       }
-
-      loading.value = false;
     }
   });
 }

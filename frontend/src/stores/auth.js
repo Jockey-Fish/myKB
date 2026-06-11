@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { login as apiLogin, getCurrentUser } from '../api'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') || '')
@@ -8,23 +9,51 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
-  function login(username, password, remember) {
-    if (username && password) {
-      token.value = 'mock-token-' + Date.now()
-      user.value = { username, name: '用户' }
-      rememberMe.value = remember
+  async function login(username, password, remember) {
+    token.value = ''
+    user.value = null
+    
+    try {
+      const result = await apiLogin({ username, password })
       
-      if (remember) {
-        localStorage.setItem('token', token.value)
-        localStorage.setItem('user', JSON.stringify(user.value))
+      if (result.success && result.data) {
+        token.value = result.data.token
+        user.value = result.data.user || { username }
+        rememberMe.value = remember
+        
+        if (remember) {
+          localStorage.setItem('token', token.value)
+          localStorage.setItem('user', JSON.stringify(user.value))
+        } else {
+          sessionStorage.setItem('token', token.value)
+          sessionStorage.setItem('user', JSON.stringify(user.value))
+        }
+        
+        return { success: true, message: '登录成功' }
       } else {
-        sessionStorage.setItem('token', token.value)
-        sessionStorage.setItem('user', JSON.stringify(user.value))
+        return { success: false, message: result.message || '登录失败' }
       }
-      
-      return true
+    } catch (error) {
+      return { success: false, message: error.message || '登录失败' }
     }
-    return false
+  }
+
+  async function refreshUser() {
+    try {
+      const result = await getCurrentUser()
+      if (result.success && result.data) {
+        user.value = result.data
+        if (rememberMe.value) {
+          localStorage.setItem('user', JSON.stringify(user.value))
+        } else {
+          sessionStorage.setItem('user', JSON.stringify(user.value))
+        }
+        return { success: true }
+      }
+    } catch (error) {
+      console.error('刷新用户信息失败:', error)
+    }
+    return { success: false }
   }
 
   function logout() {
@@ -43,6 +72,7 @@ export const useAuthStore = defineStore('auth', () => {
     rememberMe,
     isLoggedIn,
     login,
-    logout
+    logout,
+    refreshUser
   }
 })

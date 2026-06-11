@@ -10,7 +10,12 @@
           <p>注册您的AI知识库账户</p>
         </div>
 
-        <el-form ref="registerForm" :model="form" :rules="rules" class="register-form">
+        <el-form
+          ref="registerForm"
+          :model="form"
+          :rules="rules"
+          class="register-form"
+        >
           <el-form-item prop="username">
             <el-input
               v-model="form.username"
@@ -124,7 +129,15 @@
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { Cpu, MagicStick, ChatRound, Document, View, Hide } from "@element-plus/icons-vue";
+import {
+  Cpu,
+  MagicStick,
+  ChatRound,
+  Document,
+  View,
+  Hide,
+} from "@element-plus/icons-vue";
+import { register as apiRegister } from "../api";
 
 const router = useRouter();
 
@@ -174,7 +187,9 @@ const rules = {
     { type: "email", message: "请输入有效的邮箱地址", trigger: "blur" },
   ],
   password: [{ required: true, validator: validatePass, trigger: "blur" }],
-  confirmPassword: [{ required: true, validator: validatePass2, trigger: "blur" }],
+  confirmPassword: [
+    { required: true, validator: validatePass2, trigger: "blur" },
+  ],
   agreement: [
     {
       validator: (rule, value, callback) => {
@@ -189,17 +204,31 @@ const rules = {
   ],
 };
 
-function handleRegister() {
+async function handleRegister() {
+  if (!registerForm.value) return;
+
   registerForm.value.validate(async (valid) => {
     if (valid) {
       loading.value = true;
 
-      // 模拟注册请求
-      setTimeout(() => {
+      try {
+        const result = await apiRegister({
+          username: form.username,
+          email: form.email,
+          password: form.password,
+        });
+
+        if (result.success) {
+          ElMessage.success(result.message || "注册成功，请登录");
+          router.push("/login");
+        } else {
+          ElMessage.error(result.message || "注册失败");
+        }
+      } catch (error) {
+        ElMessage.error(error.message || "注册失败");
+      } finally {
         loading.value = false;
-        ElMessage.success("注册成功，请登录");
-        router.push("/login");
-      }, 1500);
+      }
     }
   });
 }
@@ -288,7 +317,9 @@ function showPrivacy() {
   border-radius: 10px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .register-button:hover {

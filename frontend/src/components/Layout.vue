@@ -82,7 +82,7 @@
     </main>
 
     <footer class="layout-footer">
-      <p>AI知识库 © 2024 - 智能文档问答系统</p>
+      <p>AI知识库 © 2026 - 智能文档问答系统</p>
     </footer>
   </div>
 </template>
