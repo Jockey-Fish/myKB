@@ -72,6 +72,11 @@ app.use("/api/extract", extractRoutes);
 app.use("/api/rag", ragRoutes);
 app.use("/api/chat", chatRoutes);
 
+// favicon.ico 请求处理
+app.get("/favicon.ico", (req, res) => {
+  res.status(204).end();
+});
+
 // 健康检查接口
 app.get("/health", (req, res) => {
   res.json({
