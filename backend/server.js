@@ -66,7 +66,7 @@ app.use("/uploads", express.static(uploadDir));
 
 // API路由
 app.use("/api/auth", authRoutes);
-app.use("/api/documents/upload", uploadRoutes);
+app.use("/api/documents", uploadRoutes);
 app.use("/api/documents", documentsRoutes);
 app.use("/api/extract", extractRoutes);
 app.use("/api/rag", ragRoutes);

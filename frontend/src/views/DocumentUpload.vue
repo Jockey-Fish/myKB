@@ -103,13 +103,13 @@
             <el-list-item v-for="doc in recentDocuments" :key="doc.id">
               <template #default>
                 <div class="document-info">
-                  <el-icon :size="24" :color="getFileIconColor(doc.file_type)">
-                    <component :is="getFileIcon(doc.file_type)" />
+                  <el-icon :size="24" :color="getFileIconColor(doc.filetype)">
+                    <component :is="getFileIcon(doc.filetype)" />
                   </el-icon>
                   <div class="document-meta">
-                    <span class="document-name">{{ doc.original_name }}</span>
+                    <span class="document-name">{{ doc.filename }}</span>
                     <span class="document-time">{{
-                      formatTime(doc.created_at)
+                      formatTime(doc.createdAt)
                     }}</span>
                   </div>
                 </div>
@@ -223,6 +223,15 @@ function cancelUpload(id) {
 }
 
 function getFileIcon(item) {
+  if (typeof item === "string") {
+    // 处理文档类型字符串（来自文档列表）
+    switch (item.toLowerCase()) {
+      case "pdf":
+        return Document;
+      default:
+        return Files;
+    }
+  }
   if (item.file) {
     const ext = item.file.name
       .toLowerCase()
@@ -238,6 +247,17 @@ function getFileIcon(item) {
 }
 
 function getFileIconColor(item) {
+  if (typeof item === "string") {
+    // 处理文档类型字符串（来自文档列表）
+    switch (item.toLowerCase()) {
+      case "pdf":
+        return "#e74c3c";
+      case "md":
+        return "#2ecc71";
+      default:
+        return "#3498db";
+    }
+  }
   if (item.file) {
     const ext = item.file.name
       .toLowerCase()

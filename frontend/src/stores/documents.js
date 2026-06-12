@@ -1,26 +1,46 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { getDocuments, uploadDocument, deleteDocument } from '../api'
+import { defineStore } from "pinia";
+import { ref, computed } from "vue";
+import { getDocuments, uploadDocument, deleteDocument } from "../api";
 
-export const useDocumentsStore = defineStore('documents', () => {
-  const documents = ref([])
-  const loading = ref(false)
-  const uploadQueue = ref([])
-  const selectedDocumentId = ref(null)
+export const useDocumentsStore = defineStore("documents", () => {
+  const documents = ref([]);
+  const loading = ref(false);
+  const uploadQueue = ref([]);
+  const selectedDocumentId = ref(null);
 
   const selectedDocument = computed(() => {
-    return documents.value.find(doc => doc.id === selectedDocumentId.value) || null
-  })
+    return (
+      documents.value.find((doc) => doc.id === selectedDocumentId.value) || null
+    );
+  });
 
   async function loadDocuments() {
-    loading.value = true
+    loading.value = true;
     try {
-      const data = await getDocuments()
-      documents.value = data
+      const result = await getDocuments();
+
+      // 处理分页响应格式
+      let documentsData = [];
+      if (result.success) {
+        if (Array.isArray(result.data)) {
+          // 直接返回数组格式
+          documentsData = result.data;
+        } else if (result.data && Array.isArray(result.data.list)) {
+          // 分页响应格式 { list: [...], pagination: {...} }
+          documentsData = result.data.list;
+        }
+      }
+
+      documents.value = documentsData;
+
+      if (documentsData.length === 0) {
+        console.warn("文档列表为空");
+      }
     } catch (error) {
-      console.error('加载文档失败:', error)
+      documents.value = [];
+      console.error("加载文档失败:", error);
     } finally {
-      loading.value = false
+      loading.value = false;
     }
   }
 
@@ -30,43 +50,45 @@ export const useDocumentsStore = defineStore('documents', () => {
       file,
       name: file.name,
       progress: 0,
-      status: 'uploading'
-    }
-    uploadQueue.value.push(uploadItem)
+      status: "uploading",
+    };
+    uploadQueue.value.push(uploadItem);
 
     try {
-      uploadItem.progress = 30
-      const result = await uploadDocument(file)
-      uploadItem.progress = 100
-      uploadItem.status = 'success'
-      await loadDocuments()
-      
+      uploadItem.progress = 30;
+      const result = await uploadDocument(file);
+      uploadItem.progress = 100;
+      uploadItem.status = "success";
+      await loadDocuments();
+
       setTimeout(() => {
-        uploadQueue.value = uploadQueue.value.filter(item => item.id !== uploadItem.id)
-      }, 2000)
-      
-      return result
+        uploadQueue.value = uploadQueue.value.filter(
+          (item) => item.id !== uploadItem.id,
+        );
+      }, 2000);
+
+      return result;
     } catch (error) {
-      uploadItem.status = 'error'
-      uploadItem.error = error.response?.data?.error || '上传失败'
-      throw error
+      uploadItem.status = "error";
+      uploadItem.error = error.response?.data?.error || "上传失败";
+      throw error;
     }
   }
 
   async function removeDocument(id) {
     try {
-      await deleteDocument(id)
-      documents.value = documents.value.filter(doc => doc.id !== id)
+      await deleteDocument(id);
+      documents.value = documents.value.filter((doc) => doc.id !== id);
       if (selectedDocumentId.value === id) {
-        selectedDocumentId.value = null
+        selectedDocumentId.value = null;
       }
     } catch (error) {
-      throw error
+      throw error;
     }
   }
 
   function selectDocument(id) {
-    selectedDocumentId.value = id
+    selectedDocumentId.value = id;
   }
 
   return {
@@ -78,6 +100,6 @@ export const useDocumentsStore = defineStore('documents', () => {
     loadDocuments,
     addDocument,
     removeDocument,
-    selectDocument
-  }
-})
+    selectDocument,
+  };
+});
