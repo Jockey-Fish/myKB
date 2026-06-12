@@ -103,13 +103,13 @@
             <el-list-item v-for="doc in recentDocuments" :key="doc.id">
               <template #default>
                 <div class="document-info">
-                  <el-icon :size="24" :color="getFileIconColor(doc.filetype)">
-                    <component :is="getFileIcon(doc.filetype)" />
+                  <el-icon :size="24" :color="getFileIconColor(doc.file_type)">
+                    <component :is="getFileIcon(doc.file_type)" />
                   </el-icon>
                   <div class="document-meta">
                     <span class="document-name">{{ doc.filename }}</span>
                     <span class="document-time">{{
-                      formatTime(doc.createdAt)
+                      formatTime(doc.created_at)
                     }}</span>
                   </div>
                 </div>

@@ -144,10 +144,13 @@ router.post("/upload", authMiddleware, (req, res) => {
         {
           id: documentId,
           filename: originalname,
-          filetype,
+          original_name: originalname,
+          file_type: filetype,
           filesize: size,
-          uploadTime: new Date().toISOString(),
+          upload_time: new Date().toISOString(),
+          created_at: new Date().toISOString(),
           status: "completed",
+          chunk_count: 0,
         },
         "文件上传成功",
       );
@@ -209,10 +212,13 @@ router.post("/upload-multiple", authMiddleware, (req, res) => {
         results.push({
           id: documentId,
           filename: originalname,
-          filetype,
+          original_name: originalname,
+          file_type: filetype,
           filesize: size,
-          uploadTime: new Date().toISOString(),
+          upload_time: new Date().toISOString(),
+          created_at: new Date().toISOString(),
           status: "completed",
+          chunk_count: 0,
         });
       }
 
