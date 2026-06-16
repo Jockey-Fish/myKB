@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const { insertDocument, updateDocumentStatus } = require("../database");
+const { processDocument } = require("./extract");
 const { authMiddleware } = require("../middleware/auth");
 const { success, error } = require("../response");
 const logger = require("../logger");
@@ -121,7 +122,7 @@ router.post("/upload", authMiddleware, (req, res) => {
       const ext = path.extname(originalname).toLowerCase().slice(1);
       const filetype = ALLOWED_TYPES[mimetype] || ext;
 
-      // 保存文档记录到数据库
+      // 保存文档记录到数据库（状态为uploading）
       const documentId = insertDocument(
         userId,
         filename,
@@ -138,7 +139,39 @@ router.post("/upload", authMiddleware, (req, res) => {
         size,
       });
 
-      // 返回文件元数据
+      // 异步处理文档（提取内容和切片），不阻塞响应
+      setTimeout(async () => {
+        logger.info(`开始异步处理文档: ${originalname}`, { documentId });
+        try {
+          const processResult = await processDocument(documentId, userId);
+          logger.info(
+            `processDocument返回结果: success=${processResult.success}, chunks=${processResult.data?.chunks?.length || 0}`,
+          );
+          const status = processResult.success ? "processed" : "error";
+          const chunkCount =
+            processResult.success && processResult.data.chunks
+              ? processResult.data.chunks.length
+              : 0;
+
+          // 更新文档状态
+          updateDocumentStatus(documentId, status);
+
+          logger.info(`文档处理完成: ${originalname}`, {
+            documentId,
+            status,
+            chunkCount,
+          });
+        } catch (err) {
+          logger.error("文档异步处理错误", {
+            documentId,
+            error: err.message,
+            stack: err.stack,
+          });
+          updateDocumentStatus(documentId, "error");
+        }
+      }, 100); // 延迟100ms执行，确保响应先返回
+
+      // 立即返回上传成功，文档在后台处理
       success(
         res,
         {
@@ -149,13 +182,14 @@ router.post("/upload", authMiddleware, (req, res) => {
           filesize: size,
           upload_time: new Date().toISOString(),
           created_at: new Date().toISOString(),
-          status: "completed",
+          status: "processing",
           chunk_count: 0,
+          message: "文件上传成功，正在后台处理...",
         },
-        "文件上传成功",
+        "文件上传成功，正在后台处理",
       );
     } catch (err) {
-      logger.error("文件上传处理错误", { error: err.message });
+      logger.error("文件上传错误", { error: err.message });
       error(res, "文件上传失败", 500);
     }
   });

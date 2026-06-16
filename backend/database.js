@@ -41,6 +41,7 @@ async function initDatabase() {
       filetype TEXT NOT NULL,
       filesize INTEGER,
       status TEXT DEFAULT 'pending',
+      chunk_count INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
@@ -151,10 +152,14 @@ function insertDocument(
     'INSERT INTO documents (user_id, filename, originalname, filepath, filetype, filesize, status) VALUES (?, ?, ?, ?, ?, ?, "completed")',
     [userId, filename, originalname, filepath, filetype, filesize],
   );
+
+  // 先获取插入的ID，再保存数据库
+  const result = db.exec("SELECT last_insert_rowid()");
+  const documentId = result[0].values[0][0];
+
   saveDatabase();
 
-  const result = db.exec("SELECT last_insert_rowid()");
-  return result[0].values[0][0];
+  return documentId;
 }
 
 function getUserDocuments(
@@ -170,7 +175,7 @@ function getUserDocuments(
   const order = sortOrder.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
   const docsResult = db.exec(
-    `SELECT id, filename, originalname, filetype, filesize, status, created_at FROM documents WHERE user_id = ? ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`,
+    `SELECT id, filename, originalname, filetype, filesize, status, created_at, chunk_count FROM documents WHERE user_id = ? ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`,
     [userId, pageSize, offset],
   );
 
@@ -184,6 +189,7 @@ function getUserDocuments(
           filesize: row[4],
           status: row[5],
           created_at: row[6],
+          chunk_count: row[7] || 0,
         }))
       : [];
 
@@ -224,7 +230,7 @@ function getAllDocuments(page = 1, pageSize = 10) {
   const offset = (page - 1) * pageSize;
 
   const docsResult = db.exec(
-    `SELECT d.id, d.filename, d.originalname, d.filetype, d.filesize, d.status, d.created_at, d.user_id, u.username 
+    `SELECT d.id, d.filename, d.originalname, d.filetype, d.filesize, d.status, d.created_at, d.user_id, u.username, d.chunk_count
      FROM documents d LEFT JOIN users u ON d.user_id = u.id 
      ORDER BY d.created_at DESC LIMIT ? OFFSET ?`,
     [pageSize, offset],
@@ -242,6 +248,7 @@ function getAllDocuments(page = 1, pageSize = 10) {
           created_at: row[6],
           user_id: row[7],
           username: row[8],
+          chunk_count: row[9] || 0,
         }))
       : [];
 
@@ -286,6 +293,17 @@ function updateDocumentStatus(documentId, status) {
   saveDatabase();
 }
 
+function updateDocumentChunkCount(documentId, chunkCount) {
+  const result = db.run("UPDATE documents SET chunk_count = ? WHERE id = ?", [
+    chunkCount,
+    documentId,
+  ]);
+  console.log(
+    `更新文档 ${documentId} 的 chunk_count 为 ${chunkCount}, 影响行数: ${result.changes}`,
+  );
+  saveDatabase();
+}
+
 module.exports = {
   initDatabase,
   createUser,
@@ -301,4 +319,5 @@ module.exports = {
   insertDocumentChunk,
   getDocumentChunks,
   updateDocumentStatus,
+  updateDocumentChunkCount,
 };

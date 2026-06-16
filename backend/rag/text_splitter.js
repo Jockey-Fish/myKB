@@ -24,10 +24,13 @@ class TextSplitter {
     const chunks = [];
     let currentPosition = 0;
     let chunkId = 0;
+    let maxIterations = Math.ceil(text.length / (this.chunkSize - this.chunkOverlap)) + 100;
+    let iterations = 0;
 
     text = this._cleanText(text);
 
-    while (currentPosition < text.length) {
+    while (currentPosition < text.length && iterations < maxIterations) {
+      iterations++;
       let endPosition = Math.min(currentPosition + this.chunkSize, text.length);
       let chunk = text.substring(currentPosition, endPosition);
 
@@ -48,7 +51,9 @@ class TextSplitter {
         });
       }
 
-      currentPosition = endPosition - this.chunkOverlap;
+      // 确保至少前进一定距离，防止无限循环
+      const nextPosition = endPosition - this.chunkOverlap;
+      currentPosition = Math.max(nextPosition, currentPosition + 1);
       if (currentPosition < 0) currentPosition = 0;
     }
 
