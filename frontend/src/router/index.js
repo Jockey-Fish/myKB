@@ -33,6 +33,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: "/documents/:id",
+    name: "DocumentDetail",
+    component: () => import("../views/DocumentDetail.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/",
     redirect: "/documents",
   },

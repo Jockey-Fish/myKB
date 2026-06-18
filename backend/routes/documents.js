@@ -11,6 +11,7 @@ const {
 const { authMiddleware } = require("../middleware/auth");
 const { success, error, notFound, paginated } = require("../response");
 const logger = require("../logger");
+const LanceVectorStore = require("../rag/lance_store");
 
 /**
  * 获取知识库文档列表
@@ -104,22 +105,36 @@ router.get("/:id", authMiddleware, (req, res) => {
  * DELETE /api/documents/:id
  * Headers: Authorization: Bearer <token>
  */
-router.delete("/:id", authMiddleware, (req, res) => {
+router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const documentId = req.params.id;
     const userId = req.user.id;
 
-    // 删除文档记录和相关数据
+    // 第一步：删除数据库记录（SQLite）
+    // 删除文档记录和相关切片数据
     const document = deleteDocument(documentId, userId);
     if (!document) {
       return notFound(res, "文档不存在或无权访问");
     }
 
-    // 删除物理文件
+    // 第二步：删除服务器本地文件
     if (fs.existsSync(document.filepath)) {
       fs.unlinkSync(document.filepath);
       logger.info(`物理文件已删除: ${document.filepath}`);
     }
+
+    // 第三步：删除LanceDB中该文档下的所有向量切片
+    // 确保数据一致性：文档删除时同步清理向量，防止脏数据
+    const vectorStore = new LanceVectorStore({
+      collectionName: "document_chunks",
+      persistPath: "./lance_db",
+    });
+    await vectorStore.initStore();
+    const deleteResult = await vectorStore.deleteByDocumentId(documentId);
+    logger.info(`LanceDB向量已删除: ${document.originalname}`, {
+      documentId,
+      deletedCount: deleteResult.deletedCount,
+    });
 
     logger.info(`文档删除成功: ${document.originalname}`, {
       documentId,
@@ -131,6 +146,7 @@ router.delete("/:id", authMiddleware, (req, res) => {
       {
         id: documentId,
         filename: document.originalname,
+        deletedVectorCount: deleteResult.deletedCount,
       },
       "文档删除成功",
     );
@@ -146,7 +162,7 @@ router.delete("/:id", authMiddleware, (req, res) => {
  * Headers: Authorization: Bearer <token>
  * Body: { ids: [1, 2, 3] }
  */
-router.post("/batch-delete", authMiddleware, (req, res) => {
+router.post("/batch-delete", authMiddleware, async (req, res) => {
   try {
     const { ids } = req.body;
     const userId = req.user.id;
@@ -160,6 +176,13 @@ router.post("/batch-delete", authMiddleware, (req, res) => {
       failed: [],
     };
 
+    // 初始化LanceDB向量存储（只初始化一次）
+    const vectorStore = new LanceVectorStore({
+      collectionName: "document_chunks",
+      persistPath: "./lance_db",
+    });
+    await vectorStore.initStore();
+
     for (const documentId of ids) {
       try {
         const document = deleteDocument(documentId, userId);
@@ -168,9 +191,14 @@ router.post("/batch-delete", authMiddleware, (req, res) => {
           if (fs.existsSync(document.filepath)) {
             fs.unlinkSync(document.filepath);
           }
+
+          // 删除LanceDB中该文档的向量切片
+          const deleteResult = await vectorStore.deleteByDocumentId(documentId);
+
           results.success.push({
             id: documentId,
             filename: document.originalname,
+            deletedVectorCount: deleteResult.deletedCount,
           });
         } else {
           results.failed.push({

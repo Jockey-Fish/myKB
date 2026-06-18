@@ -15,7 +15,6 @@ const authRoutes = require("./routes/auth");
 const uploadRoutes = require("./routes/upload");
 const extractRoutes = require("./routes/extract");
 const documentsRoutes = require("./routes/documents");
-const ragRoutes = require("./routes/rag");
 const chatRoutes = require("./routes/chat");
 
 // 创建Express应用
@@ -69,7 +68,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/documents", uploadRoutes);
 app.use("/api/documents", documentsRoutes);
 app.use("/api/extract", extractRoutes);
-app.use("/api/rag", ragRoutes);
 app.use("/api/chat", chatRoutes);
 
 // favicon.ico 请求处理

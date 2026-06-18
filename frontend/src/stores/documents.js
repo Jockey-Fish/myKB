@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { getDocuments, uploadDocument, deleteDocument } from "../api";
+import { getDocuments, uploadDocument, deleteDocument } from "../api/document";
 
 export const useDocumentsStore = defineStore("documents", () => {
   const documents = ref([]);

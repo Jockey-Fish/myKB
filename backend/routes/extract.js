@@ -14,6 +14,8 @@ const { authMiddleware } = require("../middleware/auth");
 const { success, error, notFound } = require("../response");
 const logger = require("../logger");
 const TextSplitter = require("../rag/text_splitter");
+const TextVectorizer = require("../rag/text_vectorizer");
+const LanceVectorStore = require("../rag/lance_store");
 
 /**
  * 检测文件编码
@@ -289,13 +291,63 @@ async function processDocument(documentId, userId) {
       chunkCount: chunks.length,
     });
 
-    // 将切片保存到数据库
+    // 将切片保存到数据库（SQLite）
     for (let i = 0; i < chunks.length; i++) {
       insertDocumentChunk(documentId, i, chunks[i].text);
     }
 
     // 更新文档的切片数量
     updateDocumentChunkCount(documentId, chunks.length);
+
+    // ========== 原JSON向量库逻辑替换为LanceDB实现 ==========
+    // 创建向量化器实例
+    const vectorizer = new TextVectorizer({
+      modelName: "Xenova/all-MiniLM-L6-v2",
+    });
+    await vectorizer.initialize();
+
+    // 创建LanceDB向量存储实例
+    const vectorStore = new LanceVectorStore({
+      collectionName: "document_chunks",
+      persistPath: "./lance_db",
+    });
+    await vectorStore.initStore();
+
+    // 对每个切片进行向量化
+    logger.info(`开始向量化文档切片: ${document.originalname}`, { documentId });
+    const embeddedChunks = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const [vector] = await vectorizer.embed(chunk.text);
+      embeddedChunks.push({
+        vector: vector,
+        text: chunk.text,
+        user_id: userId,
+        document_id: documentId,
+        filename: document.originalname,
+        chunk_index: i,
+        start_position: chunk.startPosition || 0,
+        end_position: chunk.endPosition || chunk.text.length,
+      });
+    }
+    logger.info(`向量化完成: ${document.originalname}`, {
+      documentId,
+      vectorCount: embeddedChunks.length,
+    });
+
+    // 批量插入到LanceDB向量库
+    // 绑定当前登录用户userId、文档ID、文件名等元数据
+    // 元数据字段说明：
+    // - user_id: 用户ID，用于多用户知识库隔离
+    // - document_id: 文档ID，用于关联原始文档和批量删除
+    // - filename: 文件名，便于溯源和展示
+    // - chunk_index: 切片索引，用于保持顺序
+    // - start_position/end_position: 文本位置，用于定位原文
+    const storeResult = await vectorStore.addDocumentChunks(embeddedChunks);
+    logger.info(`向量入库成功: ${document.originalname}`, {
+      documentId,
+      storedCount: storeResult.count,
+    });
 
     return {
       success: true,
@@ -306,13 +358,114 @@ async function processDocument(documentId, userId) {
         ...result,
         chunks: chunks,
         chunkCount: chunks.length,
+        vectorCount: storeResult.count,
         extracted_at: new Date().toISOString(),
       },
     };
   } catch (err) {
-    logger.error("文件内容提取错误", { error: err.message });
+    logger.error("文件内容提取错误", { error: err.message, stack: err.stack });
     return { success: false, message: err.message };
   }
 }
 
 module.exports.processDocument = processDocument;
+
+/**
+ * 获取文档内容
+ */
+router.get("/:id/content", authMiddleware, async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    const document = getDocumentById(documentId);
+
+    if (!document) {
+      return res.status(404).json(notFound("文档不存在"));
+    }
+
+    // 检查权限
+    if (document.user_id !== req.user.id) {
+      return res.status(403).json(error("无权访问该文档"));
+    }
+
+    // 检查文档状态
+    if (document.status !== "processed") {
+      return res.status(400).json(error("文档尚未处理完成"));
+    }
+
+    // 从数据库获取文档内容
+    const chunks = getDocumentChunks(documentId);
+    if (!chunks || chunks.length === 0) {
+      return res.status(404).json(notFound("文档内容不存在"));
+    }
+
+    // 合并所有切片内容
+    const content = chunks.map((chunk) => chunk.content).join("\n\n");
+
+    res.json(
+      success(
+        {
+          content,
+          chunkCount: chunks.length,
+          documentId,
+        },
+        "获取文档内容成功",
+      ),
+    );
+  } catch (err) {
+    logger.error("获取文档内容错误", { error: err.message });
+    res.status(500).json(error("获取文档内容失败"));
+  }
+});
+
+/**
+ * 获取文档切片
+ */
+router.get("/:id/chunks", authMiddleware, async (req, res) => {
+  try {
+    const documentId = parseInt(req.params.id);
+    const document = getDocumentById(documentId);
+
+    if (!document) {
+      return res.status(404).json(notFound("文档不存在"));
+    }
+
+    // 检查权限
+    if (document.user_id !== req.user.id) {
+      return res.status(403).json(error("无权访问该文档"));
+    }
+
+    // 检查文档状态
+    if (document.status !== "processed") {
+      return res.status(400).json(error("文档尚未处理完成"));
+    }
+
+    // 从数据库获取文档切片
+    const chunks = getDocumentChunks(documentId);
+    if (!chunks || chunks.length === 0) {
+      return res.status(404).json(notFound("文档切片不存在"));
+    }
+
+    // 格式化切片数据
+    const formattedChunks = chunks.map((chunk) => ({
+      id: chunk.id,
+      index: chunk.chunk_index,
+      content: chunk.content,
+      documentId: chunk.document_id,
+      createdAt: chunk.created_at,
+    }));
+
+    res.json(
+      success(
+        {
+          chunks: formattedChunks,
+          total: formattedChunks.length,
+          documentId,
+        },
+        "获取文档切片成功",
+      ),
+    );
+  } catch (err) {
+    logger.error("获取文档切片错误", { error: err.message });
+    res.status(500).json(error("获取文档切片失败"));
+  }
+});

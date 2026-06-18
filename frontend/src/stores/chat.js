@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { askQuestion } from '../api'
+import { askQuestion } from '../api/chat'
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref([])

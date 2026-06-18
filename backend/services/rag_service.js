@@ -2,28 +2,28 @@
  * RAG问答服务 - 整合向量检索和大模型生成
  */
 
-const TextSplitter = require('../rag/text_splitter');
-const TextVectorizer = require('../rag/text_vectorizer');
-const ChromaVectorStore = require('../rag/vector_store');
-const LLMService = require('./llm_service');
+const TextSplitter = require("../rag/text_splitter");
+const TextVectorizer = require("../rag/text_vectorizer");
+const LanceVectorStore = require("../rag/lance_store");
+const LLMService = require("./llm_service");
 
 class RAGService {
   constructor(options = {}) {
     // 文本切片器
     this.textSplitter = new TextSplitter({
       chunkSize: options.chunkSize || 500,
-      chunkOverlap: options.chunkOverlap || 50
+      chunkOverlap: options.chunkOverlap || 50,
     });
 
     // 文本向量化器
     this.vectorizer = new TextVectorizer({
-      modelName: options.embeddingModel || 'Xenova/all-MiniLM-L6-v2'
+      modelName: options.embeddingModel || "Xenova/all-MiniLM-L6-v2",
     });
 
-    // 向量存储
-    this.vectorStore = new ChromaVectorStore({
-      collectionName: options.collectionName || 'knowledge_base',
-      persistPath: options.persistPath || './chroma_db'
+    // 向量存储 - 原ChromaVectorStore逻辑替换为LanceDB实现
+    this.vectorStore = new LanceVectorStore({
+      collectionName: options.collectionName || "document_chunks",
+      persistPath: options.persistPath || "./lance_db",
     });
 
     // 大语言模型服务
@@ -31,7 +31,7 @@ class RAGService {
       provider: options.llmProvider,
       model: options.llmModel,
       baseUrl: options.llmBaseUrl,
-      apiKey: options.llmApiKey
+      apiKey: options.llmApiKey,
     });
 
     // RAG配置
@@ -49,21 +49,21 @@ class RAGService {
     if (this.initialized) return;
 
     try {
-      console.log('正在初始化RAG服务...');
-      
+      console.log("正在初始化RAG服务...");
+
       // 初始化向量化器
       await this.vectorizer.initialize();
-      
+
       // 初始化向量存储
       await this.vectorStore.initialize();
-      
+
       // 初始化LLM服务
       await this.llmService.initialize();
-      
+
       this.initialized = true;
-      console.log('RAG服务初始化完成');
+      console.log("RAG服务初始化完成");
     } catch (error) {
-      console.error('RAG服务初始化失败:', error);
+      console.error("RAG服务初始化失败:", error);
       throw error;
     }
   }
@@ -78,6 +78,11 @@ class RAGService {
 
     const startTime = Date.now();
     const topK = options.topK || this.topK;
+    const userId = options.userId;
+
+    if (!userId) {
+      throw new Error("userId不能为空，必须进行用户隔离");
+    }
 
     try {
       // 1. 向量化查询问题
@@ -85,14 +90,23 @@ class RAGService {
       const [queryVector] = await this.vectorizer.embed(question);
       const queryTime = Date.now() - queryStartTime;
 
-      // 2. 检索相关文档
+      // 2. 检索相关文档 - 原ChromaVectorStore.query逻辑替换为LanceDB的searchSimilarChunks
+      // 强制过滤当前登录用户的user_id，只能检索当前用户私有知识库
+      // 用户隔离过滤安全设计：防止越权访问其他用户向量数据
       const retrieveStartTime = Date.now();
-      const results = await this.vectorStore.query(queryVector, { k: topK });
+      const searchResult = await this.vectorStore.searchSimilarChunks(
+        queryVector,
+        {
+          user_id: userId,
+          topK: topK,
+        },
+      );
+      const results = searchResult.results;
       const retrieveTime = Date.now() - retrieveStartTime;
 
       // 3. 过滤低相关性结果
       const relevantDocs = results.filter(
-        doc => doc.distance < this.similarityThreshold
+        (doc) => doc.similarity > this.similarityThreshold,
       );
 
       // 4. 构建上下文
@@ -111,11 +125,13 @@ class RAGService {
       return {
         question,
         answer: answer.content,
-        sources: relevantDocs.map(doc => ({
-          id: doc.id,
-          text: doc.text.substring(0, 200) + (doc.text.length > 200 ? '...' : ''),
-          distance: doc.distance,
-          documentId: doc.metadata?.documentId
+        sources: relevantDocs.map((doc) => ({
+          id: doc.document_id,
+          text:
+            doc.text.substring(0, 200) + (doc.text.length > 200 ? "..." : ""),
+          similarity: doc.similarity,
+          documentId: doc.document_id,
+          filename: doc.filename,
         })),
         metadata: {
           queryTime,
@@ -124,11 +140,11 @@ class RAGService {
           totalTime,
           relevantDocsCount: relevantDocs.length,
           model: answer.model,
-          provider: answer.provider
-        }
+          provider: answer.provider,
+        },
       };
     } catch (error) {
-      console.error('RAG查询失败:', error);
+      console.error("RAG查询失败:", error);
       throw new Error(`问答失败: ${error.message}`);
     }
   }
@@ -143,17 +159,29 @@ class RAGService {
 
     const startTime = Date.now();
     const topK = options.topK || this.topK;
+    const userId = options.userId;
+
+    if (!userId) {
+      throw new Error("userId不能为空，必须进行用户隔离");
+    }
 
     try {
       // 1. 向量化查询问题
       const [queryVector] = await this.vectorizer.embed(question);
 
-      // 2. 检索相关文档
-      const results = await this.vectorStore.query(queryVector, { k: topK });
+      // 2. 检索相关文档 - 原ChromaVectorStore.query逻辑替换为LanceDB的searchSimilarChunks
+      const searchResult = await this.vectorStore.searchSimilarChunks(
+        queryVector,
+        {
+          user_id: userId,
+          topK: topK,
+        },
+      );
+      const results = searchResult.results;
 
       // 3. 过滤低相关性结果
       const relevantDocs = results.filter(
-        doc => doc.distance < this.similarityThreshold
+        (doc) => doc.similarity > this.similarityThreshold,
       );
 
       // 4. 构建上下文和提示词
@@ -162,24 +190,29 @@ class RAGService {
 
       // 5. 先返回检索结果
       yield {
-        type: 'sources',
-        data: relevantDocs.map(doc => ({
-          id: doc.id,
-          text: doc.text.substring(0, 200) + (doc.text.length > 200 ? '...' : ''),
-          distance: doc.distance,
-          documentId: doc.metadata?.documentId
-        }))
+        type: "sources",
+        data: relevantDocs.map((doc) => ({
+          id: doc.document_id,
+          text:
+            doc.text.substring(0, 200) + (doc.text.length > 200 ? "..." : ""),
+          similarity: doc.similarity,
+          documentId: doc.document_id,
+          filename: doc.filename,
+        })),
       };
 
       // 6. 流式生成回答
-      let fullContent = '';
-      for await (const chunk of this.llmService.generateStream(prompt, options)) {
+      let fullContent = "";
+      for await (const chunk of this.llmService.generateStream(
+        prompt,
+        options,
+      )) {
         if (chunk.content) {
           fullContent += chunk.content;
           yield {
-            type: 'content',
+            type: "content",
             data: chunk.content,
-            done: chunk.done
+            done: chunk.done,
           };
         }
       }
@@ -187,18 +220,17 @@ class RAGService {
       // 7. 返回完成信息
       const totalTime = Date.now() - startTime;
       yield {
-        type: 'done',
+        type: "done",
         data: {
           totalTime,
-          relevantDocsCount: relevantDocs.length
-        }
+          relevantDocsCount: relevantDocs.length,
+        },
       };
-
     } catch (error) {
-      console.error('RAG流式查询失败:', error);
+      console.error("RAG流式查询失败:", error);
       yield {
-        type: 'error',
-        data: error.message
+        type: "error",
+        data: error.message,
       };
     }
   }
@@ -208,10 +240,10 @@ class RAGService {
    */
   _buildContext(documents) {
     if (!documents || documents.length === 0) {
-      return '';
+      return "";
     }
 
-    let context = '';
+    let context = "";
     let totalLength = 0;
 
     for (const doc of documents) {
@@ -219,7 +251,7 @@ class RAGService {
       if (totalLength + text.length > this.maxContextLength) {
         break;
       }
-      context += text + '\n\n';
+      context += text + "\n\n";
       totalLength += text.length;
     }
 
@@ -259,12 +291,12 @@ ${context}
     try {
       // 1. 文本切片
       const chunks = this.textSplitter.splitTextByParagraphs(text);
-      
+
       // 2. 添加文档ID
       const chunksWithMeta = chunks.map((chunk, index) => ({
         ...chunk,
         documentId: documentId || `doc_${Date.now()}`,
-        chunkIndex: index
+        chunkIndex: index,
       }));
 
       // 3. 向量化
@@ -276,10 +308,10 @@ ${context}
       return {
         documentId: chunksWithMeta[0]?.documentId,
         chunksCount: chunks.length,
-        storedCount: result.count
+        storedCount: result.count,
       };
     } catch (error) {
-      console.error('添加文档失败:', error);
+      console.error("添加文档失败:", error);
       throw new Error(`添加文档失败: ${error.message}`);
     }
   }
@@ -291,14 +323,15 @@ ${context}
     const status = {
       initialized: this.initialized,
       vectorStore: {
-        initialized: this.vectorStore.initialized
+        initialized: this.vectorStore.initialized,
       },
-      llm: await this.llmService.getStatus()
+      llm: await this.llmService.getStatus(),
     };
 
     if (this.vectorStore.initialized) {
       try {
-        status.vectorStore.documentCount = await this.vectorStore.getDocumentCount();
+        status.vectorStore.documentCount =
+          await this.vectorStore.getDocumentCount();
       } catch (error) {
         status.vectorStore.error = error.message;
       }

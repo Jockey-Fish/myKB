@@ -1,3 +1,2 @@
-require('./database');
-require('./chroma').initChroma();
-require('./server');
+require("./database");
+require("./server");

@@ -256,7 +256,7 @@
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { useDocumentsStore } from "../stores/documents";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import Layout from "../components/Layout.vue";
 import {
   Files,
@@ -415,8 +415,7 @@ function handleRowClick(row) {
 }
 
 function viewDocument(row) {
-  selectedDocument.value = row;
-  showDetailModal.value = true;
+  router.push(`/documents/${row.id}`);
 }
 
 function chatWithDocument(row) {

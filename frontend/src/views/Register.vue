@@ -137,7 +137,7 @@ import {
   View,
   Hide,
 } from "@element-plus/icons-vue";
-import { register as apiRegister } from "../api";
+import { register as apiRegister } from "../api/auth";
 
 const router = useRouter();
 
