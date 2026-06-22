@@ -132,6 +132,12 @@ class RAGService {
           similarity: doc.similarity,
           documentId: doc.document_id,
           filename: doc.filename,
+          chunkIndex: parseInt(doc.chunk_index) || 0,
+          metadata: {
+            chunkIndex: parseInt(doc.chunk_index) || 0,
+            startPosition: doc.start_position,
+            endPosition: doc.end_position,
+          },
         })),
         metadata: {
           queryTime,
@@ -198,6 +204,12 @@ class RAGService {
           similarity: doc.similarity,
           documentId: doc.document_id,
           filename: doc.filename,
+          chunkIndex: parseInt(doc.chunk_index) || 0,
+          metadata: {
+            chunkIndex: parseInt(doc.chunk_index) || 0,
+            startPosition: doc.start_position,
+            endPosition: doc.end_position,
+          },
         })),
       };
 

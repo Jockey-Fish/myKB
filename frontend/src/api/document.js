@@ -126,10 +126,7 @@ export async function testRetrieval(params) {
       top_k: params.topK || 5,
       document_id: params.document_id,
     });
-    return {
-      success: true,
-      data: response.data,
-    };
+    return response;
   } catch (error) {
     return handleApiError(error);
   }

@@ -268,7 +268,8 @@
                           </el-tag>
                           <div class="result-similarity">
                             <el-icon><TrendCharts /></el-icon>
-                            相似度: {{ (1 - result.distance).toFixed(2) }}
+                            相似度:
+                            {{ result.similarity?.toFixed(2) || "0.00" }}
                           </div>
                         </div>
                         <div class="result-meta">
@@ -481,7 +482,8 @@ async function testRetrieval() {
     });
 
     if (response.code === 200 && response.data) {
-      retrievalResults.value = response.data.results || [];
+      retrievalResults.value =
+        response.data.sources || response.data.results || [];
       if (retrievalResults.value.length === 0) {
         ElMessage.info("未找到相关内容");
       }
