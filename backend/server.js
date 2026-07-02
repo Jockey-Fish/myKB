@@ -29,10 +29,13 @@ if (!fs.existsSync(uploadDir)) {
 
 // ==================== 中间件配置 ====================
 
-// CORS配置
+// CORS配置 - 支持动态Origin以兼容流式请求
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "*",
+    origin: (origin, callback) => {
+      // 允许所有来源，包括null（本地文件）
+      callback(null, origin || "*");
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,

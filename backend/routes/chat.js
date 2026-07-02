@@ -37,7 +37,7 @@ const chatLimiter = rateLimit({
  */
 router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
   try {
-    const { question, topK, maxTokens, temperature } = req.body;
+    const { question, topK, maxTokens, temperature, document_id } = req.body;
 
     // 参数验证
     if (
@@ -66,6 +66,7 @@ router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
       maxTokens,
       temperature,
       userId: req.user.id,
+      documentId: document_id,
     });
 
     res.json({
@@ -92,7 +93,7 @@ router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
  */
 router.post("/stream", authMiddleware, chatLimiter, async (req, res) => {
   try {
-    const { question, topK, maxTokens, temperature } = req.body;
+    const { question, topK, maxTokens, temperature, document_id } = req.body;
 
     // 参数验证
     if (
@@ -127,13 +128,15 @@ router.post("/stream", authMiddleware, chatLimiter, async (req, res) => {
       maxTokens,
       temperature,
       userId: req.user.id,
+      documentId: document_id,
+      debug: req.query.debug === 'true',
     });
 
     for await (const chunk of stream) {
       // 发送SSE事件
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
 
-      // 立即刷新缓冲区
+      // 强制刷新响应缓冲区，确保数据实时发送到客户端
       if (res.flush) {
         res.flush();
       }

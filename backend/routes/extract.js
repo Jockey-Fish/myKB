@@ -14,7 +14,7 @@ const { authMiddleware } = require("../middleware/auth");
 const { success, error, notFound } = require("../response");
 const logger = require("../logger");
 const TextSplitter = require("../rag/text_splitter");
-const TextVectorizer = require("../rag/text_vectorizer");
+const OllamaEmbeddingService = require("../services/ollama_embedding_service");
 const LanceVectorStore = require("../rag/lance_store");
 
 /**
@@ -300,9 +300,10 @@ async function processDocument(documentId, userId) {
     updateDocumentChunkCount(documentId, chunks.length);
 
     // ========== 原JSON向量库逻辑替换为LanceDB实现 ==========
-    // 创建向量化器实例
-    const vectorizer = new TextVectorizer({
-      modelName: "Xenova/all-MiniLM-L6-v2",
+    // 创建Ollama Embedding服务实例（向量维度由环境变量VECTOR_DIMENSION配置）
+    const vectorizer = new OllamaEmbeddingService({
+      baseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
+      model: process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text",
     });
     await vectorizer.initialize();
 
@@ -318,7 +319,7 @@ async function processDocument(documentId, userId) {
     const embeddedChunks = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const [vector] = await vectorizer.embed(chunk.text);
+      const vector = await vectorizer.embed(chunk.text);
       embeddedChunks.push({
         vector: vector,
         text: chunk.text,

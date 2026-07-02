@@ -89,6 +89,12 @@
                 <span>智能助手</span>
               </div>
               <div class="chat-actions">
+                <el-switch
+                  v-model="debugMode"
+                  active-text="Debug模式"
+                  size="small"
+                  style="margin-right: 10px"
+                />
                 <el-button size="small" icon="Trash" @click="clearChat">
                   清空对话
                 </el-button>
@@ -145,22 +151,75 @@
                       <el-icon size="14">
                         <Document />
                       </el-icon>
-                      参考来源
+                      参考来源 ({{ msg.sources.length }})
                     </div>
                     <div
                       v-for="(source, sIndex) in msg.sources"
                       :key="sIndex"
                       class="source-item"
                     >
-                      <span class="source-doc"
-                        >文档 #{{ source.documentId }}</span
+                      <div class="source-info">
+                        <span class="source-doc">
+                          <el-icon size="12"><Files /></el-icon>
+                          {{ source.filename || `文档 #${source.documentId}` }}
+                        </span>
+                        <el-tag size="small" type="success">
+                          相似度 {{ (source.similarity * 100).toFixed(1) }}%
+                        </el-tag>
+                      </div>
+                      <div class="source-meta">
+                        <span class="source-chunk"
+                          >Chunk #{{ source.chunkIndex }}</span
+                        >
+                        <el-button
+                          size="small"
+                          text
+                          type="primary"
+                          @click="toggleSourceExpand(sIndex)"
+                        >
+                          {{ expandedSources[sIndex] ? "收起" : "展开" }}
+                        </el-button>
+                      </div>
+                      <div
+                        v-if="expandedSources[sIndex]"
+                        class="source-content"
                       >
-                      <span class="source-similarity"
-                        >相似度
-                        {{ (source.similarity * 100).toFixed(1) }}%</span
-                      >
+                        {{ source.text }}
+                      </div>
                     </div>
                   </div>
+                  <div v-if="debugMode && msg.debugInfo" class="message-debug">
+                    <div class="debug-header">
+                      <el-icon size="14"><Cpu /></el-icon>
+                      Debug信息
+                    </div>
+                    <div class="debug-content">
+                      <div class="debug-section">
+                        <strong>检索耗时:</strong>
+                        {{ msg.debugInfo.retrieveTime }}ms
+                      </div>
+                      <div class="debug-section">
+                        <strong>生成耗时:</strong>
+                        {{ msg.debugInfo.generateTime }}ms
+                      </div>
+                      <div class="debug-section">
+                        <strong>总耗时:</strong> {{ msg.debugInfo.totalTime }}ms
+                      </div>
+                      <div class="debug-section">
+                        <strong>模型:</strong> {{ msg.debugInfo.model }}
+                      </div>
+                      <div class="debug-section">
+                        <strong>Provider:</strong> {{ msg.debugInfo.provider }}
+                      </div>
+                      <div class="debug-section">
+                        <strong>Prompt:</strong>
+                        <pre class="debug-prompt">{{
+                          msg.debugInfo.prompt
+                        }}</pre>
+                      </div>
+                    </div>
+                  </div>
+
                   <div class="message-time">
                     {{ formatTime(msg.timestamp) }}
                   </div>
@@ -169,7 +228,7 @@
 
               <div v-if="chatStore.loading" class="loading-message">
                 <el-spinner size="32" />
-                <span>正在思考...</span>
+                <span>{{ loadingText }}</span>
               </div>
             </div>
 
@@ -209,7 +268,15 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from "vue";
+import {
+  ref,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+} from "vue";
 import { useDocumentsStore } from "../stores/documents";
 import { useChatStore } from "../stores/chat";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -231,6 +298,14 @@ const question = ref("");
 const selectedDocumentId = ref(null);
 const currentHistoryIndex = ref(-1);
 const isStreaming = ref(false);
+const debugMode = ref(false);
+const expandedSources = ref({});
+const loadingText = ref("正在思考...");
+
+// AbortController用于中断流式请求
+let abortController = null;
+let requestTimeoutId = null;
+let scrollDebounceId = null;
 
 const processedDocuments = computed(() => {
   return documentsStore.documents.filter((d) => d.status === "processed");
@@ -287,7 +362,29 @@ function refreshDocuments() {
   documentsStore.loadDocuments();
 }
 
+function toggleSourceExpand(index) {
+  expandedSources.value[index] = !expandedSources.value[index];
+}
+
+function updateLoadingText(phase) {
+  switch (phase) {
+    case "retrieving":
+      loadingText.value = "检索知识库中...";
+      break;
+    case "generating":
+      loadingText.value = "AI生成答案中...";
+      break;
+    default:
+      loadingText.value = "正在思考...";
+  }
+}
+
+/**
+ * 发送消息进行AI问答（流式响应）
+ * 健壮性修复：异常捕获、SSE解析兼容、AbortController中断、状态兜底
+ */
 async function sendMessage() {
+  // 请求前置锁：防止重复点击发送发起多条并发请求
   if (!question.value.trim() || isStreaming.value) return;
 
   const userQuestion = question.value.trim();
@@ -302,28 +399,51 @@ async function sendMessage() {
   };
   chatStore.messages.push(userMsg);
 
-  // 添加AI消息占位
-  const botMsg = {
+  // 添加AI消息占位（使用reactive确保响应式）
+  const botMsg = reactive({
     id: Date.now() + 1,
     type: "bot",
     content: "",
     sources: [],
     timestamp: new Date().toISOString(),
-  };
+    error: false,
+  });
   chatStore.messages.push(botMsg);
 
+  // 设置全局loading状态
   isStreaming.value = true;
   chatStore.loading = true;
+  updateLoadingText("retrieving");
+
+  // 创建AbortController用于中断请求
+  abortController = new AbortController();
+  const { signal } = abortController;
+
+  // 设置30秒超时自动终止流式请求
+  requestTimeoutId = setTimeout(() => {
+    if (abortController && !signal.aborted) {
+      abortController.abort();
+      botMsg.content = "请求超时，请稍后重试";
+      botMsg.error = true;
+      ElMessage.warning("请求超时，已自动终止");
+    }
+  }, 60000);
 
   try {
-    // 获取token
-    const token = localStorage.getItem("token");
+    // 获取token（同时检查localStorage和sessionStorage）
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token");
     if (!token) {
       throw new Error("未登录，请先登录");
     }
 
-    // 调用流式API
-    const response = await fetch("/api/chat/stream", {
+    // 调用流式API，绑定AbortController signal
+    // 对于流式请求，直接连接后端以避免Vite代理问题
+    const streamUrl = import.meta.env.DEV
+      ? "http://localhost:3001/api/chat/stream"
+      : "/api/chat/stream";
+
+    const response = await fetch(streamUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -334,12 +454,28 @@ async function sendMessage() {
         topK: 5,
         maxTokens: 2048,
         temperature: 0.7,
+        document_id: selectedDocumentId.value,
       }),
+      signal, // 绑定中断信号
     });
 
+    // 401登录过期精细化处理
+    if (response.status === 401) {
+      // 同时清除localStorage和sessionStorage的token
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
+      // 自动跳转到登录页
+      window.location.href = "/login";
+      throw new Error("登录已过期，请重新登录");
+    }
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "请求失败");
+      const errorData = await response
+        .json()
+        .catch(() => ({ message: "请求失败" }));
+      throw new Error(errorData.message || `请求失败(${response.status})`);
     }
 
     // 处理SSE流式响应
@@ -347,55 +483,195 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // 流式读取循环
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      // 内层try/catch捕获流读取异常，防止逃逸
+      try {
+        const { done, value } = await reader.read();
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+        // 流正常结束
+        if (done) {
+          // 清除超时定时器
+          if (requestTimeoutId) {
+            clearTimeout(requestTimeoutId);
+            requestTimeoutId = null;
+          }
+          break;
+        }
 
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
+        // 解码数据并追加到缓冲区
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE数据解析兼容：统一替换\r换行符，兼容Windows \r\n格式
+        buffer = buffer.replace(/\r/g, "");
+
+        // 按换行符分割
+        const lines = buffer.split("\n");
+        // 保留最后一个可能不完整的行
+        buffer = lines.pop() || "";
+
+        // 处理每一行SSE数据
+        for (const line of lines) {
+          // 过滤空行、空白无效行再解析
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith("data: ")) {
+            continue;
+          }
+
+          const data = trimmedLine.slice(6);
           if (data === "[DONE]") {
             continue;
           }
 
+          // SSE事件解析，解析失败静默丢弃
           try {
             const event = JSON.parse(data);
 
+            // 处理四种SSE事件：sources/content/done/error
             if (event.type === "sources") {
               // 更新参考来源
-              botMsg.sources = event.data;
+              botMsg.sources = event.data || [];
+              updateLoadingText("generating");
             } else if (event.type === "content") {
               // 流式追加内容（打字机效果）
-              botMsg.content += event.data;
-              scrollToBottom();
+              botMsg.content += event.data || "";
+              scrollToBottomDebounced();
             } else if (event.type === "done") {
               // 完成
               console.log("生成完成:", event.data);
             } else if (event.type === "error") {
-              throw new Error(event.data);
+              // 业务抛出错误
+              throw new Error(event.data || "生成失败");
+            } else if (event.type === "debug") {
+              // Debug信息
+              if (debugMode.value) {
+                botMsg.debugInfo = event.data;
+              }
             }
-          } catch (e) {
-            if (e.message !== "Unexpected end of JSON input") {
-              console.error("解析SSE数据失败:", e);
-            }
+          } catch (parseError) {
+            // SSE解析错误：单条数据解析失败静默丢弃，避免控制台大量冗余报错
+            // 仅打印简易调试日志
+            console.log("SSE数据解析跳过:", data.substring(0, 50));
           }
         }
+      } catch (streamError) {
+        // 区分主动取消请求和真实异常
+        if (signal.aborted) {
+          // 主动中断，不显示错误
+          console.log("请求已中断");
+          break;
+        }
+        // 真实流读取异常
+        console.error("流读取异常:", streamError);
+        botMsg.content = `流式响应异常：${streamError.message}`;
+        botMsg.error = true;
+        break;
       }
+    }
+
+    // 释放reader读取锁
+    try {
+      reader.releaseLock();
+    } catch (e) {
+      // reader可能已关闭，忽略释放锁错误
     }
   } catch (error) {
     console.error("发送消息失败:", error);
-    botMsg.content = `抱歉，发生了错误：${error.message}`;
-    botMsg.error = true;
-    ElMessage.error(error.message);
+
+    if (error.name === "AbortError") {
+      if (!botMsg.content) {
+        botMsg.content = "请求已中断";
+        botMsg.error = true;
+      }
+    } else if (error.message.includes("未登录")) {
+      botMsg.content = "请先登录后再进行问答";
+      botMsg.error = true;
+      ElMessage.warning("请先登录");
+    } else if (error.message.includes("过期")) {
+      botMsg.content = "登录已过期，请重新登录";
+      botMsg.error = true;
+    } else if (
+      error.message.includes("网络") ||
+      error.message.includes("ECONNREFUSED")
+    ) {
+      botMsg.content = "网络连接失败，请检查网络状态";
+      botMsg.error = true;
+      ElMessage.error("网络异常");
+    } else if (error.message.includes("Ollama")) {
+      botMsg.content = "AI服务暂时不可用，请检查Ollama服务是否已启动";
+      botMsg.error = true;
+      ElMessage.error("AI服务不可用");
+    } else if (error.message.includes("ECONNREFUSED")) {
+      botMsg.content =
+        "无法连接到AI服务，请确认Ollama已启动并运行在 http://127.0.0.1:11434";
+      botMsg.error = true;
+      ElMessage.error("AI服务连接失败");
+    } else {
+      botMsg.content = `抱歉，发生了错误：${error.message}`;
+      botMsg.error = true;
+      ElMessage.error(error.message);
+    }
   } finally {
+    // 状态兜底：无论成功、失败、中断，统一重置loading状态
     isStreaming.value = false;
     chatStore.loading = false;
-    scrollToBottom();
+
+    // 清理所有定时器，防止内存泄漏
+    if (requestTimeoutId) {
+      clearTimeout(requestTimeoutId);
+      requestTimeoutId = null;
+    }
+    if (scrollDebounceId) {
+      clearTimeout(scrollDebounceId);
+      scrollDebounceId = null;
+    }
+
+    // 清理AbortController
+    abortController = null;
+
+    // 最终滚动到底部
+    scrollToBottomDebounced();
   }
+}
+
+/**
+ * 停止生成（手动中断请求）
+ */
+function stopGeneration() {
+  if (abortController && isStreaming.value) {
+    abortController.abort();
+    ElMessage.info("已停止生成");
+  }
+}
+
+/**
+ * scrollToBottom防抖版本（100ms）
+ * 避免流式输出高频滚动造成页面卡顿
+ */
+function scrollToBottomDebounced() {
+  if (scrollDebounceId) {
+    clearTimeout(scrollDebounceId);
+  }
+  scrollDebounceId = setTimeout(() => {
+    nextTick(() => {
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop =
+          messagesContainer.value.scrollHeight;
+      }
+    });
+    scrollDebounceId = null;
+  }, 100);
+}
+
+/**
+ * 原scrollToBottom保留，用于非流式场景
+ */
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    }
+  });
 }
 
 function sendQuickQuestion(q) {
@@ -435,18 +711,33 @@ function loadHistory(history) {
   });
 }
 
-function scrollToBottom() {
-  nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-    }
-  });
-}
-
 watch(() => chatStore.messages, scrollToBottom, { deep: true });
 
 onMounted(() => {
   documentsStore.loadDocuments();
+});
+
+// 组件卸载时清理资源，防止内存泄漏
+onUnmounted(() => {
+  // 中断正在进行的流式请求
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+
+  // 清理所有定时器
+  if (requestTimeoutId) {
+    clearTimeout(requestTimeoutId);
+    requestTimeoutId = null;
+  }
+  if (scrollDebounceId) {
+    clearTimeout(scrollDebounceId);
+    scrollDebounceId = null;
+  }
+
+  // 重置loading状态
+  isStreaming.value = false;
+  chatStore.loading = false;
 });
 </script>
 
@@ -750,6 +1041,74 @@ onMounted(() => {
 
 .source-similarity {
   color: #2ecc71;
+}
+
+.source-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.source-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #999;
+}
+
+.source-chunk {
+  font-size: 11px;
+  color: #666;
+}
+
+.source-content {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #555;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-debug {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.debug-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #856404;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.debug-section {
+  margin-bottom: 8px;
+  color: #856404;
+}
+
+.debug-prompt {
+  background: white;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-time {

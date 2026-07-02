@@ -59,9 +59,10 @@ class LanceVectorStore {
         this.collection = await this.db.openTable(this.collectionName);
         logger.info(`LanceDB集合已加载: ${this.collectionName}`);
       } else {
+        const vectorDimension = parseInt(process.env.VECTOR_DIMENSION) || 768;
         const sampleData = [
           {
-            vector: new Array(384).fill(0),
+            vector: new Array(vectorDimension).fill(0),
             text: "",
             user_id: "",
             document_id: "",
@@ -100,8 +101,45 @@ class LanceVectorStore {
     }
 
     try {
+      // #region debug-point validate-chunks
+      // 验证向量数据格式
+      const vectorDimension = parseInt(process.env.VECTOR_DIMENSION) || 768;
+      logger.debug("开始验证chunks向量数据", {
+        chunksCount: chunks.length,
+        expectedDimension: vectorDimension,
+      });
+
+      for (let i = 0; i < Math.min(3, chunks.length); i++) {
+        const chunk = chunks[i];
+        logger.debug(`chunk ${i} 详情`, {
+          hasVector: !!chunk.vector,
+          vectorType: Array.isArray(chunk.vector)
+            ? "array"
+            : typeof chunk.vector,
+          vectorLength: chunk.vector?.length,
+          vectorConstructor: chunk.vector?.constructor?.name,
+          firstValues: chunk.vector?.slice(0, 5),
+          textPreview: chunk.text?.substring(0, 30),
+        });
+      }
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        if (!chunk.vector || !Array.isArray(chunk.vector)) {
+          throw new Error(`chunk ${i} 缺少向量数据`);
+        }
+        if (chunk.vector.length !== vectorDimension) {
+          throw new Error(
+            `chunk ${i} 向量长度不匹配: 期望${vectorDimension}, 实际${chunk.vector.length}`,
+          );
+        }
+      }
+      // #endregion debug-point validate-chunks
+
+      // #region debug-point prepare-data
+      // 将向量转换为Float32Array以确保格式正确
       const data = chunks.map((chunk) => ({
-        vector: chunk.vector,
+        vector: new Float32Array(chunk.vector),
         text: chunk.text || "",
         user_id: String(chunk.user_id),
         document_id: String(chunk.document_id),
@@ -110,6 +148,15 @@ class LanceVectorStore {
         start_position: String(chunk.start_position || 0),
         end_position: String(chunk.end_position || 0),
       }));
+
+      logger.debug("数据准备完成", {
+        dataCount: data.length,
+        firstVectorLength: data[0].vector.length,
+        firstVectorType: data[0].vector.constructor.name,
+        firstVectorByteLength: data[0].vector.byteLength,
+        totalVectorBytes: data.reduce((sum, d) => sum + d.vector.byteLength, 0),
+      });
+      // #endregion debug-point prepare-data
 
       await this.collection.add(data);
       logger.info(`成功添加 ${chunks.length} 个文档切片到LanceDB`);
@@ -148,9 +195,10 @@ class LanceVectorStore {
 
       // 如果删除后表为空，保留一条示例数据以维护表结构
       if (remainingData.length === 0) {
+        const vectorDimension = parseInt(process.env.VECTOR_DIMENSION) || 768;
         const emptyData = [
           {
-            vector: new Array(384).fill(0),
+            vector: new Array(vectorDimension).fill(0),
             text: "",
             user_id: "",
             document_id: "",
@@ -194,8 +242,8 @@ class LanceVectorStore {
       const userIdStr = String(options.user_id);
 
       let query = this.collection
-        .vectorSearch(queryVector)
-        .where(`user_id = '${escapeString(options.user_id)}'`) // SQL注入防护：转义用户输入
+        .search(queryVector)
+        .where(`user_id = '${escapeString(options.user_id)}'`)
         .select([
           "text",
           "document_id",
@@ -208,7 +256,7 @@ class LanceVectorStore {
       if (options.document_id) {
         query = query.where(
           `document_id = '${escapeString(options.document_id)}'`,
-        ); // SQL注入防护：转义用户输入
+        );
       }
 
       const results = await query.limit(topK).toArray();

@@ -32,7 +32,7 @@ function error(res, message = '操作失败', code = 400, errors = null) {
     timestamp: new Date().toISOString()
   };
   logger.error(`Response: ${code} - ${message}`);
-  return res.status(code >= 500 ? code : 200).json(response);
+  return res.status(code).json(response);
 }
 
 // 分页响应

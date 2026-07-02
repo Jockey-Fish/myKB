@@ -3,9 +3,9 @@
  */
 
 const TextSplitter = require("../rag/text_splitter");
-const TextVectorizer = require("../rag/text_vectorizer");
+const OllamaEmbeddingService = require("./ollama_embedding_service");
 const LanceVectorStore = require("../rag/lance_store");
-const LLMService = require("./llm_service");
+const OllamaLLMService = require("./ollama_llm_service");
 
 class RAGService {
   constructor(options = {}) {
@@ -15,27 +15,35 @@ class RAGService {
       chunkOverlap: options.chunkOverlap || 50,
     });
 
-    // 文本向量化器
-    this.vectorizer = new TextVectorizer({
-      modelName: options.embeddingModel || "Xenova/all-MiniLM-L6-v2",
+    // Ollama Embedding服务
+    this.vectorizer = new OllamaEmbeddingService({
+      baseUrl:
+        options.ollamaBaseUrl ||
+        process.env.OLLAMA_BASE_URL ||
+        "http://localhost:11434",
+      model:
+        options.embeddingModel ||
+        process.env.OLLAMA_EMBEDDING_MODEL ||
+        "nomic-embed-text",
     });
 
-    // 向量存储 - 原ChromaVectorStore逻辑替换为LanceDB实现
+    // 向量存储 - LanceDB实现
     this.vectorStore = new LanceVectorStore({
       collectionName: options.collectionName || "document_chunks",
       persistPath: options.persistPath || "./lance_db",
     });
 
-    // 大语言模型服务
-    this.llmService = new LLMService({
-      provider: options.llmProvider,
-      model: options.llmModel,
-      baseUrl: options.llmBaseUrl,
-      apiKey: options.llmApiKey,
+    // Ollama LLM服务
+    this.llmService = new OllamaLLMService({
+      baseUrl:
+        options.ollamaBaseUrl ||
+        process.env.OLLAMA_BASE_URL ||
+        "http://localhost:11434",
+      model: options.llmModel || process.env.OLLAMA_MODEL || "qwen2.5:7b",
     });
 
     // RAG配置
-    this.topK = options.topK || 5;
+    this.topK = options.topK || parseInt(process.env.TOP_K) || 5;
     this.similarityThreshold = options.similarityThreshold || 0.3;
     this.maxContextLength = options.maxContextLength || 3000;
 
@@ -87,7 +95,7 @@ class RAGService {
     try {
       // 1. 向量化查询问题
       const queryStartTime = Date.now();
-      const [queryVector] = await this.vectorizer.embed(question);
+      const queryVector = await this.vectorizer.embed(question);
       const queryTime = Date.now() - queryStartTime;
 
       // 2. 检索相关文档 - 原ChromaVectorStore.query逻辑替换为LanceDB的searchSimilarChunks
@@ -99,6 +107,7 @@ class RAGService {
         {
           user_id: userId,
           topK: topK,
+          document_id: options.documentId,
         },
       );
       const results = searchResult.results;
@@ -173,7 +182,7 @@ class RAGService {
 
     try {
       // 1. 向量化查询问题
-      const [queryVector] = await this.vectorizer.embed(question);
+      const queryVector = await this.vectorizer.embed(question);
 
       // 2. 检索相关文档 - 原ChromaVectorStore.query逻辑替换为LanceDB的searchSimilarChunks
       const searchResult = await this.vectorStore.searchSimilarChunks(
@@ -181,6 +190,7 @@ class RAGService {
         {
           user_id: userId,
           topK: topK,
+          document_id: options.documentId,
         },
       );
       const results = searchResult.results;
@@ -213,14 +223,31 @@ class RAGService {
         })),
       };
 
+      // 如果启用debug模式，返回debug信息
+      if (options.debug) {
+        yield {
+          type: "debug",
+          data: {
+            retrieveTime: retrieveTime,
+            prompt: prompt,
+            relevantDocsCount: relevantDocs.length,
+            topK: topK,
+            similarityThreshold: this.similarityThreshold,
+          },
+        };
+      }
+
       // 6. 流式生成回答
       let fullContent = "";
+      let lastChunk = null;
+      const generateStartTime = Date.now();
       for await (const chunk of this.llmService.generateStream(
         prompt,
         options,
       )) {
         if (chunk.content) {
           fullContent += chunk.content;
+          lastChunk = chunk;
           yield {
             type: "content",
             data: chunk.content,
@@ -228,6 +255,7 @@ class RAGService {
           };
         }
       }
+      const generateTime = Date.now() - generateStartTime;
 
       // 7. 返回完成信息
       const totalTime = Date.now() - startTime;
@@ -238,6 +266,20 @@ class RAGService {
           relevantDocsCount: relevantDocs.length,
         },
       };
+
+      // 如果启用debug模式，返回最终debug信息
+      if (options.debug) {
+        yield {
+          type: "debug",
+          data: {
+            totalTime: totalTime,
+            retrieveTime: retrieveTime,
+            generateTime: generateTime,
+            model: lastChunk?.model || "unknown",
+            provider: lastChunk?.provider || "ollama",
+          },
+        };
+      }
     } catch (error) {
       console.error("RAG流式查询失败:", error);
       yield {
@@ -275,20 +317,31 @@ class RAGService {
    */
   _buildPrompt(question, context) {
     if (context) {
-      return `你是一个专业的AI助手。请根据以下参考知识回答用户的问题。如果参考知识中没有相关信息，请根据你的知识如实回答，但要说明这不是来自知识库。
+      return `你是一名知识库助手。
 
-参考知识：
+请严格依据以下知识内容回答问题。
+
+如果知识库中不存在答案，请明确说明：
+
+"当前知识库中未找到相关内容。"
+
+知识内容：
+
 ${context}
 
-用户问题：${question}
+用户问题：
 
-请提供准确、详细的回答：`;
+${question}`;
     } else {
-      return `你是一个专业的AI助手。请回答用户的问题。
+      return `你是一名知识库助手。
 
-用户问题：${question}
+当前知识库中未找到与问题相关的内容。
 
-请提供准确、详细的回答：`;
+用户问题：
+
+${question}
+
+请说明当前知识库中未找到相关内容。`;
     }
   }
 
