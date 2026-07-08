@@ -478,7 +478,8 @@ async function testRetrieval() {
   try {
     const response = await testRetrievalApi({
       query: retrievalQuery.value,
-      k: topK.value,
+      topK: topK.value,
+      document_id: document.value.id,
     });
 
     if (response.code === 200 && response.data) {

@@ -16,9 +16,22 @@ function getTimestamp() {
 }
 
 // 格式化日志消息
+function safeStringify(obj) {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) {
+        return '[Circular]';
+      }
+      seen.add(value);
+    }
+    return value;
+  });
+}
+
 function formatMessage(level, message, meta = {}) {
   const timestamp = getTimestamp();
-  const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+  const metaStr = Object.keys(meta).length > 0 ? ` ${safeStringify(meta)}` : '';
   return `[${timestamp}] [${level}] ${message}${metaStr}\n`;
 }
 

@@ -11,7 +11,7 @@ const rateLimit = require("express-rate-limit");
 // 创建RAG服务实例
 const ragService = new RAGService({
   topK: 5,
-  similarityThreshold: 0.5,
+  similarityThreshold: 0.05,
   maxContextLength: 3000,
 });
 
@@ -37,7 +37,8 @@ const chatLimiter = rateLimit({
  */
 router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
   try {
-    const { question, topK, maxTokens, temperature, document_id } = req.body;
+    const { question, topK, top_k, maxTokens, temperature, document_id } =
+      req.body;
 
     // 参数验证
     if (
@@ -62,12 +63,21 @@ router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
 
     // 执行RAG查询
     const result = await ragService.query(question, {
-      topK: topK || 5,
+      topK: topK || top_k || 5,
       maxTokens,
       temperature,
       userId: req.user.id,
       documentId: document_id,
     });
+
+    console.log(
+      `[DEBUG] /chat/ask - userId=${req.user.id}, document_id=${document_id}, sourcesCount=${result.sources.length}`,
+    );
+    if (result.sources.length > 0) {
+      console.log(
+        `[DEBUG] /chat/ask - 第一条相似度=${result.sources[0].similarity}`,
+      );
+    }
 
     res.json({
       code: 200,
@@ -93,7 +103,8 @@ router.post("/ask", authMiddleware, chatLimiter, async (req, res) => {
  */
 router.post("/stream", authMiddleware, chatLimiter, async (req, res) => {
   try {
-    const { question, topK, maxTokens, temperature, document_id } = req.body;
+    const { question, topK, top_k, maxTokens, temperature, document_id } =
+      req.body;
 
     // 参数验证
     if (
@@ -124,12 +135,12 @@ router.post("/stream", authMiddleware, chatLimiter, async (req, res) => {
 
     // 执行流式RAG查询
     const stream = ragService.queryStream(question, {
-      topK: topK || 5,
+      topK: topK || top_k || 5,
       maxTokens,
       temperature,
       userId: req.user.id,
       documentId: document_id,
-      debug: req.query.debug === 'true',
+      debug: req.query.debug === "true",
     });
 
     for await (const chunk of stream) {

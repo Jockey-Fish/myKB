@@ -149,7 +149,7 @@ function insertDocument(
   filesize,
 ) {
   db.run(
-    'INSERT INTO documents (user_id, filename, originalname, filepath, filetype, filesize, status) VALUES (?, ?, ?, ?, ?, ?, "completed")',
+    'INSERT INTO documents (user_id, filename, originalname, filepath, filetype, filesize, status) VALUES (?, ?, ?, ?, ?, ?, "uploading")',
     [userId, filename, originalname, filepath, filetype, filesize],
   );
 

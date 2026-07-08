@@ -269,14 +269,22 @@ class LanceVectorStore {
         start_position: row.start_position || "0",
         end_position: row.end_position || "0",
         distance: row._distance || 0,
-        similarity: Math.max(0, 1 - (row._distance || 0)),
+        similarity: row._distance ? Math.max(0, 1 - row._distance / 500) : 0,
       }));
 
-      logger.info(
-        `用户 ${userIdStr} 相似度检索完成，返回 ${formattedResults.length} 条结果`,
+      const sortedResults = formattedResults.sort(
+        (a, b) => b.similarity - a.similarity,
       );
 
-      return { success: true, results: formattedResults };
+      const filteredResults = sortedResults
+        .filter((r) => r.text.length >= 20)
+        .slice(0, topK);
+
+      logger.info(
+        `用户 ${userIdStr} 相似度检索完成，返回 ${filteredResults.length} 条结果（过滤前 ${formattedResults.length} 条）`,
+      );
+
+      return { success: true, results: filteredResults };
     } catch (error) {
       logger.error("相似度检索失败:", error);
       throw new Error(`检索失败: ${error.message}`);

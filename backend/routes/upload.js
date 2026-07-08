@@ -4,7 +4,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
-const { insertDocument, updateDocumentStatus } = require("../database");
+const { insertDocument, updateDocumentStatus, updateDocumentChunkCount } = require("../database");
 const { processDocument } = require("./extract");
 const { authMiddleware } = require("../middleware/auth");
 const { success, error } = require("../response");
@@ -153,8 +153,9 @@ router.post("/upload", authMiddleware, (req, res) => {
               ? processResult.data.chunks.length
               : 0;
 
-          // 更新文档状态
+          // 更新文档状态和切片数量
           updateDocumentStatus(documentId, status);
+          updateDocumentChunkCount(documentId, chunkCount);
 
           logger.info(`文档处理完成: ${originalname}`, {
             documentId,
@@ -251,9 +252,38 @@ router.post("/upload-multiple", authMiddleware, (req, res) => {
           filesize: size,
           upload_time: new Date().toISOString(),
           created_at: new Date().toISOString(),
-          status: "completed",
+          status: "processing",
           chunk_count: 0,
         });
+
+        // 异步处理每个文档
+        setTimeout(async () => {
+          logger.info(`开始异步处理文档: ${originalname}`, { documentId });
+          try {
+            const processResult = await processDocument(documentId, userId);
+            const status = processResult.success ? "processed" : "error";
+            const chunkCount =
+              processResult.success && processResult.data.chunks
+                ? processResult.data.chunks.length
+                : 0;
+
+            updateDocumentStatus(documentId, status);
+            updateDocumentChunkCount(documentId, chunkCount);
+
+            logger.info(`文档处理完成: ${originalname}`, {
+              documentId,
+              status,
+              chunkCount,
+            });
+          } catch (err) {
+            logger.error("文档异步处理错误", {
+              documentId,
+              error: err.message,
+              stack: err.stack,
+            });
+            updateDocumentStatus(documentId, "error");
+          }
+        }, 100);
       }
 
       logger.info(`批量文件上传成功: ${results.length}个文件`, { userId });

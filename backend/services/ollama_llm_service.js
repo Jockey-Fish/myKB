@@ -13,7 +13,7 @@ class OllamaLLMService {
       process.env.OLLAMA_BASE_URL ||
       "http://127.0.0.1:11434";
     this.model = options.model || process.env.OLLAMA_MODEL || "qwen2.5:7b";
-    this.timeout = options.timeout || 60000; // 60秒超时
+    this.timeout = options.timeout || 300000; // 300秒超时
     this.initialized = false;
 
     // 创建axios实例 - 强制使用IPv4
@@ -23,8 +23,7 @@ class OllamaLLMService {
       headers: {
         "Content-Type": "application/json",
       },
-      httpAgent: new (require("http").Agent)({ family: 4 }),
-      httpsAgent: new (require("https").Agent)({ family: 4 }),
+      transformRequest: [(data) => JSON.stringify(data)],
     });
   }
 
@@ -90,8 +89,17 @@ class OllamaLLMService {
         promptLength: prompt.length,
       });
 
+      console.log(
+        `[LLM DEBUG] Sending request to ${this.baseUrl}/api/generate`,
+      );
+      console.log(`[LLM DEBUG] Prompt length: ${prompt.length}`);
+
       const response = await this.client.post("/api/generate", payload);
       const result = response.data;
+
+      console.log(
+        `[LLM DEBUG] Response received, keys: ${Object.keys(result).join(", ")}`,
+      );
 
       const generateTime = Date.now() - startTime;
 
@@ -154,14 +162,24 @@ class OllamaLLMService {
       const stream = response.data;
 
       for await (const chunk of stream) {
-        const lines = chunk
-          .toString()
-          .split("\n")
-          .filter((line) => line.trim());
+        const chunkStr = chunk.toString();
+        const lines = chunkStr.split("\n").filter((line) => line.trim());
+
+        console.log(
+          `[LLM DEBUG] chunk length: ${chunk.length}, lines count: ${lines.length}`,
+        );
 
         for (const line of lines) {
           try {
-            const data = JSON.parse(line);
+            let parseLine = line;
+            if (line.length > 5000) {
+              const idx = line.indexOf('"context":');
+              if (idx !== -1) {
+                const safeLine = line.substring(0, idx) + '"context":[]}';
+                parseLine = safeLine;
+              }
+            }
+            const data = JSON.parse(parseLine);
 
             if (data.done) {
               logger.info("Ollama流式生成完成", {
@@ -187,6 +205,7 @@ class OllamaLLMService {
             };
           } catch (parseError) {
             logger.warn("解析Ollama流式响应失败:", parseError);
+            console.log(`[LLM DEBUG] Failed line: "${line.substring(0, 200)}"`);
           }
         }
       }

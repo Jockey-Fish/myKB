@@ -427,7 +427,7 @@ async function sendMessage() {
       botMsg.error = true;
       ElMessage.warning("请求超时，已自动终止");
     }
-  }, 60000);
+  }, 300000);
 
   try {
     // 获取token（同时检查localStorage和sessionStorage）
@@ -454,7 +454,9 @@ async function sendMessage() {
         topK: 5,
         maxTokens: 2048,
         temperature: 0.7,
-        document_id: selectedDocumentId.value,
+        ...(selectedDocumentId.value && {
+          document_id: selectedDocumentId.value,
+        }),
       }),
       signal, // 绑定中断信号
     });

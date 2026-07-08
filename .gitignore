@@ -7,8 +7,20 @@ dist
 
 .vscode
 .idea
+.trae/
 
 *.log
 
 # 向量数据库存储目录
 lance_db/
+
+# SQLite数据库文件
+backend/knowledge_base.db
+backend/knowledge_base.db.backup.*
+
+# 用户上传文件
+backend/uploads/
+
+# Playwright测试报告
+frontend/playwright-report/
+frontend/test-results/

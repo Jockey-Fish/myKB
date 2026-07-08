@@ -20,7 +20,7 @@ class RAGService {
       baseUrl:
         options.ollamaBaseUrl ||
         process.env.OLLAMA_BASE_URL ||
-        "http://localhost:11434",
+        "http://127.0.0.1:11434",
       model:
         options.embeddingModel ||
         process.env.OLLAMA_EMBEDDING_MODEL ||
@@ -38,13 +38,13 @@ class RAGService {
       baseUrl:
         options.ollamaBaseUrl ||
         process.env.OLLAMA_BASE_URL ||
-        "http://localhost:11434",
+        "http://127.0.0.1:11434",
       model: options.llmModel || process.env.OLLAMA_MODEL || "qwen2.5:7b",
     });
 
     // RAG配置
     this.topK = options.topK || parseInt(process.env.TOP_K) || 5;
-    this.similarityThreshold = options.similarityThreshold || 0.3;
+    this.similarityThreshold = options.similarityThreshold || 0.05;
     this.maxContextLength = options.maxContextLength || 3000;
 
     this.initialized = false;
@@ -102,6 +102,9 @@ class RAGService {
       // 强制过滤当前登录用户的user_id，只能检索当前用户私有知识库
       // 用户隔离过滤安全设计：防止越权访问其他用户向量数据
       const retrieveStartTime = Date.now();
+      console.log(
+        `[RAG DEBUG] searchSimilarChunks params: user_id=${userId}, document_id=${options.documentId}, topK=${topK}`,
+      );
       const searchResult = await this.vectorStore.searchSimilarChunks(
         queryVector,
         {
@@ -111,11 +114,21 @@ class RAGService {
         },
       );
       const results = searchResult.results;
+      console.log(
+        `[RAG DEBUG] searchSimilarChunks returned: ${results.length} results`,
+      );
+      if (results.length > 0) {
+        console.log(
+          `[RAG DEBUG] first result: document_id=${results[0].document_id}, similarity=${results[0].similarity}`,
+        );
+      }
       const retrieveTime = Date.now() - retrieveStartTime;
 
-      // 3. 过滤低相关性结果
       const relevantDocs = results.filter(
         (doc) => doc.similarity > this.similarityThreshold,
+      );
+      console.log(
+        `[RAG DEBUG] similarityThreshold=${this.similarityThreshold}, after filter: ${relevantDocs.length}`,
       );
 
       // 4. 构建上下文
@@ -185,6 +198,7 @@ class RAGService {
       const queryVector = await this.vectorizer.embed(question);
 
       // 2. 检索相关文档 - 原ChromaVectorStore.query逻辑替换为LanceDB的searchSimilarChunks
+      const retrieveStartTime = Date.now();
       const searchResult = await this.vectorStore.searchSimilarChunks(
         queryVector,
         {
@@ -194,6 +208,7 @@ class RAGService {
         },
       );
       const results = searchResult.results;
+      const retrieveTime = Date.now() - retrieveStartTime;
 
       // 3. 过滤低相关性结果
       const relevantDocs = results.filter(

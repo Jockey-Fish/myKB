@@ -24,8 +24,7 @@ class OllamaEmbeddingService {
       headers: {
         "Content-Type": "application/json",
       },
-      httpAgent: new (require("http").Agent)({ family: 4 }),
-      httpsAgent: new (require("https").Agent)({ family: 4 }),
+      transformRequest: [(data) => JSON.stringify(data)],
     });
   }
 
