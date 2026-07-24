@@ -13,7 +13,6 @@ app.use(pinia);
 app.use(router);
 app.use(ElementPlus);
 
-// 全局注册所有 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component);
 }

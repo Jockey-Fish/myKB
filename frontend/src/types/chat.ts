@@ -48,3 +48,21 @@ export interface RetrievalTestRequest {
   query: string;
   topK?: number;
 }
+
+export interface ChatMessage {
+  id: number;
+  type: "user" | "bot";
+  content: string;
+  sources?: ChatSource[];
+  timestamp: Date;
+  error?: boolean;
+}
+
+export interface ChatHistory {
+  documentId: number | null;
+  messages: Array<{
+    question: string;
+    answer: string;
+    timestamp: Date;
+  }>;
+}

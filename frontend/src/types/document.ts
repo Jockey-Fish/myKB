@@ -63,3 +63,12 @@ export interface DeleteResponse {
   success: boolean;
   message: string;
 }
+
+export interface UploadQueueItem {
+  id: number;
+  file: File;
+  name: string;
+  progress: number;
+  status: "uploading" | "success" | "error";
+  error?: string;
+}

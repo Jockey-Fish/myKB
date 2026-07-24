@@ -50,7 +50,7 @@
               <el-icon size="20" class="user-icon">
                 <User />
               </el-icon>
-              <span>{{ authStore.user?.name || "用户" }}</span>
+              <span>{{ authStore.user?.username || "用户" }}</span>
               <el-icon size="16" class="dropdown-icon">
                 <CaretBottom />
               </el-icon>
@@ -87,9 +87,9 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useRouter, useRoute } from "vue-router";
+import { useRouter, useRoute, type RouteLocationRaw } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import { ElMessage } from "element-plus";
 import {
@@ -109,7 +109,7 @@ const authStore = useAuthStore();
 const isLoggedIn = computed(() => authStore.isLoggedIn);
 const currentRoute = computed(() => route.path);
 
-function goHome() {
+function goHome(): void {
   if (isLoggedIn.value) {
     router.push("/documents");
   } else {
@@ -117,11 +117,11 @@ function goHome() {
   }
 }
 
-function navigateTo(path) {
+function navigateTo(path: RouteLocationRaw): void {
   router.push(path);
 }
 
-function handleLogout() {
+function handleLogout(): void {
   authStore.logout();
   router.push("/login");
   ElMessage.success("退出成功");
