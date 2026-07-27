@@ -125,10 +125,11 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import type { FormInstance, FormRules, FormItemRule } from "element-plus";
 import {
   Cpu,
   MagicStick,
@@ -138,15 +139,24 @@ import {
   Hide,
 } from "@element-plus/icons-vue";
 import { register as apiRegister } from "../api/auth";
+import type { RegisterRequest } from "../types/auth";
+
+interface RegisterFormData {
+  username: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  agreement: boolean;
+}
 
 const router = useRouter();
 
-const registerForm = ref(null);
-const showPassword = ref(false);
-const showConfirmPassword = ref(false);
-const loading = ref(false);
+const registerForm = ref<FormInstance | null>(null);
+const showPassword = ref<boolean>(false);
+const showConfirmPassword = ref<boolean>(false);
+const loading = ref<boolean>(false);
 
-const form = reactive({
+const form = reactive<RegisterFormData>({
   username: "",
   email: "",
   password: "",
@@ -154,20 +164,28 @@ const form = reactive({
   agreement: false,
 });
 
-const validatePass = (rule, value, callback) => {
+const validatePass = (
+  _rule: FormItemRule,
+  value: string,
+  callback: (error?: Error) => void
+): void => {
   if (value === "") {
     callback(new Error("请输入密码"));
   } else if (value.length < 6 || value.length > 20) {
     callback(new Error("密码长度为6-20位"));
   } else {
     if (form.confirmPassword !== "") {
-      registerForm.value.validateField("confirmPassword");
+      registerForm.value?.validateField("confirmPassword");
     }
     callback();
   }
 };
 
-const validatePass2 = (rule, value, callback) => {
+const validatePass2 = (
+  _rule: FormItemRule,
+  value: string,
+  callback: (error?: Error) => void
+): void => {
   if (value === "") {
     callback(new Error("请再次输入密码"));
   } else if (value !== form.password) {
@@ -177,7 +195,7 @@ const validatePass2 = (rule, value, callback) => {
   }
 };
 
-const rules = {
+const rules: FormRules = {
   username: [
     { required: true, message: "请输入用户名", trigger: "blur" },
     { min: 3, max: 20, message: "用户名长度为3-20位", trigger: "blur" },
@@ -192,7 +210,11 @@ const rules = {
   ],
   agreement: [
     {
-      validator: (rule, value, callback) => {
+      validator: (
+        _rule: FormItemRule,
+        value: boolean,
+        callback: (error?: Error) => void
+      ): void => {
         if (!value) {
           callback(new Error("请阅读并同意服务条款和隐私政策"));
         } else {
@@ -204,19 +226,20 @@ const rules = {
   ],
 };
 
-async function handleRegister() {
+async function handleRegister(): Promise<void> {
   if (!registerForm.value) return;
 
-  registerForm.value.validate(async (valid) => {
+  registerForm.value.validate(async (valid: boolean) => {
     if (valid) {
       loading.value = true;
 
       try {
-        const result = await apiRegister({
+        const requestData: RegisterRequest = {
           username: form.username,
           email: form.email,
           password: form.password,
-        });
+        };
+        const result = await apiRegister(requestData);
 
         if (result.success) {
           ElMessage.success(result.message || "注册成功，请登录");
@@ -225,7 +248,7 @@ async function handleRegister() {
           ElMessage.error(result.message || "注册失败");
         }
       } catch (error) {
-        ElMessage.error(error.message || "注册失败");
+        ElMessage.error((error as Error).message || "注册失败");
       } finally {
         loading.value = false;
       }
@@ -233,11 +256,11 @@ async function handleRegister() {
   });
 }
 
-function showTerms() {
+function showTerms(): void {
   ElMessage.info("服务条款页面开发中");
 }
 
-function showPrivacy() {
+function showPrivacy(): void {
   ElMessage.info("隐私政策页面开发中");
 }
 </script>

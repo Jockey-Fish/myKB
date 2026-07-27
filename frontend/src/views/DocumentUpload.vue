@@ -125,46 +125,55 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useDocumentsStore } from "../stores/documents";
 import { ElMessage } from "element-plus";
+import type { Component } from "vue";
 import Layout from "../components/Layout.vue";
 import { Upload, Files, Document } from "@element-plus/icons-vue";
+import type {
+  Document as DocumentType,
+  UploadQueueItem,
+} from "../types/document";
+
+type TagType = "success" | "warning" | "danger" | "info";
+type ProgressStatus = "success" | "exception" | "loading";
 
 const documentsStore = useDocumentsStore();
 
-const fileInput = ref(null);
-const isDragOver = ref(false);
-const uploadQueue = ref([]);
+const fileInput = ref<HTMLInputElement | null>(null);
+const isDragOver = ref<boolean>(false);
+const uploadQueue = ref<UploadQueueItem[]>([]);
 
 const uploadDisabled = computed(() => {
   return uploadQueue.value.some((item) => item.status === "uploading");
 });
 
-const recentDocuments = computed(() => {
+const recentDocuments = computed<DocumentType[]>(() => {
   return documentsStore.documents.slice(0, 5);
 });
 
-function triggerFileInput() {
+function triggerFileInput(): void {
   if (!uploadDisabled.value) {
     fileInput.value?.click();
   }
 }
 
-function handleFileSelect(event) {
-  const files = event.target.files;
+function handleFileSelect(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  const files = target.files;
   if (files) {
     Array.from(files).forEach((file) => {
       addToQueue(file);
     });
   }
-  event.target.value = "";
+  target.value = "";
 }
 
-function handleDrop(event) {
+function handleDrop(event: DragEvent): void {
   isDragOver.value = false;
-  const files = event.dataTransfer.files;
+  const files = event.dataTransfer?.files;
   if (files) {
     Array.from(files).forEach((file) => {
       addToQueue(file);
@@ -172,9 +181,9 @@ function handleDrop(event) {
   }
 }
 
-async function addToQueue(file) {
+async function addToQueue(file: File): Promise<void> {
   const ext = file.name.toLowerCase().substring(file.name.lastIndexOf("."));
-  const validExtensions = [".pdf", ".txt", ".md"];
+  const validExtensions: string[] = [".pdf", ".txt", ".md"];
 
   if (!validExtensions.includes(ext)) {
     ElMessage.error(`不支持的文件格式: ${file.name}`);
@@ -186,7 +195,7 @@ async function addToQueue(file) {
     return;
   }
 
-  const item = {
+  const item: UploadQueueItem = {
     id: Date.now() + Math.random(),
     file,
     name: file.name,
@@ -209,12 +218,14 @@ async function addToQueue(file) {
     ElMessage.success(`文件上传成功: ${file.name}`);
   } catch (error) {
     item.status = "error";
-    item.error = error.response?.data?.error || "上传失败";
+    item.error =
+      (error as { response?: { data?: { error?: string } } }).response?.data
+        ?.error || "上传失败";
     ElMessage.error(`文件上传失败: ${file.name}`);
   }
 }
 
-function cancelUpload(id) {
+function cancelUpload(id: number): void {
   const item = uploadQueue.value.find((i) => i.id === id);
   if (item) {
     item.status = "cancelled";
@@ -222,9 +233,8 @@ function cancelUpload(id) {
   }
 }
 
-function getFileIcon(item) {
+function getFileIcon(item: string | UploadQueueItem): Component {
   if (typeof item === "string") {
-    // 处理文档类型字符串（来自文档列表）
     switch (item.toLowerCase()) {
       case "pdf":
         return Document;
@@ -246,9 +256,8 @@ function getFileIcon(item) {
   return Files;
 }
 
-function getFileIconColor(item) {
+function getFileIconColor(item: string | UploadQueueItem): string {
   if (typeof item === "string") {
-    // 处理文档类型字符串（来自文档列表）
     switch (item.toLowerCase()) {
       case "pdf":
         return "#e74c3c";
@@ -274,7 +283,7 @@ function getFileIconColor(item) {
   return "#666";
 }
 
-function getProgressStatus(status) {
+function getProgressStatus(status: string): ProgressStatus {
   switch (status) {
     case "success":
       return "success";
@@ -285,7 +294,7 @@ function getProgressStatus(status) {
   }
 }
 
-function getStatusTagType(status) {
+function getStatusTagType(status?: string): TagType {
   switch (status) {
     case "processed":
       return "success";
@@ -298,7 +307,7 @@ function getStatusTagType(status) {
   }
 }
 
-function getStatusLabel(status) {
+function getStatusLabel(status?: string): string {
   switch (status) {
     case "processed":
       return "已处理";
@@ -307,11 +316,11 @@ function getStatusLabel(status) {
     case "error":
       return "处理失败";
     default:
-      return status;
+      return status || "";
   }
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp?: string): string {
   if (!timestamp) return "-";
   return new Date(timestamp).toLocaleString("zh-CN", {
     month: "short",

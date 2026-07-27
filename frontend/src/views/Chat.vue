@@ -267,7 +267,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import {
   ref,
   computed,
@@ -280,6 +280,7 @@ import {
 import { useDocumentsStore } from "../stores/documents";
 import { useChatStore } from "../stores/chat";
 import { ElMessage, ElMessageBox } from "element-plus";
+import type { Component } from "vue";
 import Layout from "../components/Layout.vue";
 import {
   Cpu,
@@ -289,35 +290,51 @@ import {
   Document,
   Files,
 } from "@element-plus/icons-vue";
+import type {
+  ChatMessage,
+  ChatSource,
+  ChatHistory,
+  DebugInfo,
+} from "../types/chat";
+import type { Document as DocumentType } from "../types/document";
+
+interface BotMessage extends ChatMessage {
+  type: "bot";
+  content: string;
+  sources: ChatSource[];
+  debugInfo?: DebugInfo;
+  error: boolean;
+}
+
+type PhaseType = "retrieving" | "generating";
 
 const documentsStore = useDocumentsStore();
 const chatStore = useChatStore();
 
-const messagesContainer = ref(null);
-const question = ref("");
-const selectedDocumentId = ref(null);
-const currentHistoryIndex = ref(-1);
-const isStreaming = ref(false);
-const debugMode = ref(false);
-const expandedSources = ref({});
-const loadingText = ref("正在思考...");
+const messagesContainer = ref<HTMLDivElement | null>(null);
+const question = ref<string>("");
+const selectedDocumentId = ref<number | null>(null);
+const currentHistoryIndex = ref<number>(-1);
+const isStreaming = ref<boolean>(false);
+const debugMode = ref<boolean>(false);
+const expandedSources = ref<Record<number, boolean>>({});
+const loadingText = ref<string>("正在思考...");
 
-// AbortController用于中断流式请求
-let abortController = null;
-let requestTimeoutId = null;
-let scrollDebounceId = null;
+let abortController: AbortController | null = null;
+let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let scrollDebounceId: ReturnType<typeof setTimeout> | null = null;
 
-const processedDocuments = computed(() => {
+const processedDocuments = computed<DocumentType[]>(() => {
   return documentsStore.documents.filter((d) => d.status === "processed");
 });
 
-const sampleQuestions = [
+const sampleQuestions: string[] = [
   "文档的主要内容是什么？",
   "请总结一下文档内容",
   "文档中有哪些关键点？",
 ];
 
-function getFileIcon(type) {
+function getFileIcon(type?: string): Component {
   switch (type?.toLowerCase()) {
     case "pdf":
       return Document;
@@ -326,7 +343,7 @@ function getFileIcon(type) {
   }
 }
 
-function getFileIconColor(type) {
+function getFileIconColor(type?: string): string {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "#e74c3c";
@@ -337,7 +354,7 @@ function getFileIconColor(type) {
   }
 }
 
-function getStatusLabel(status) {
+function getStatusLabel(status?: string): string {
   switch (status) {
     case "processed":
       return "已处理";
@@ -346,11 +363,11 @@ function getStatusLabel(status) {
     case "error":
       return "处理失败";
     default:
-      return status;
+      return status || "";
   }
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp?: string): string {
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
@@ -358,15 +375,15 @@ function formatTime(timestamp) {
   });
 }
 
-function refreshDocuments() {
+function refreshDocuments(): void {
   documentsStore.loadDocuments();
 }
 
-function toggleSourceExpand(index) {
+function toggleSourceExpand(index: number): void {
   expandedSources.value[index] = !expandedSources.value[index];
 }
 
-function updateLoadingText(phase) {
+function updateLoadingText(phase: PhaseType): void {
   switch (phase) {
     case "retrieving":
       loadingText.value = "检索知识库中...";
@@ -383,15 +400,13 @@ function updateLoadingText(phase) {
  * 发送消息进行AI问答（流式响应）
  * 健壮性修复：异常捕获、SSE解析兼容、AbortController中断、状态兜底
  */
-async function sendMessage() {
-  // 请求前置锁：防止重复点击发送发起多条并发请求
+async function sendMessage(): Promise<void> {
   if (!question.value.trim() || isStreaming.value) return;
 
   const userQuestion = question.value.trim();
   question.value = "";
 
-  // 添加用户消息
-  const userMsg = {
+  const userMsg: ChatMessage = {
     id: Date.now(),
     type: "user",
     content: userQuestion,
@@ -399,8 +414,7 @@ async function sendMessage() {
   };
   chatStore.messages.push(userMsg);
 
-  // 添加AI消息占位（使用reactive确保响应式）
-  const botMsg = reactive({
+  const botMsg = reactive<BotMessage>({
     id: Date.now() + 1,
     type: "bot",
     content: "",
@@ -481,6 +495,9 @@ async function sendMessage() {
     }
 
     // 处理SSE流式响应
+    if (!response.body) {
+      throw new Error("响应体为空");
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -525,29 +542,27 @@ async function sendMessage() {
             continue;
           }
 
-          // SSE事件解析，解析失败静默丢弃
-          try {
-            const event = JSON.parse(data);
+          interface SSEEvent {
+            type: string;
+            data: unknown;
+          }
 
-            // 处理四种SSE事件：sources/content/done/error
+          try {
+            const event: SSEEvent = JSON.parse(data);
+
             if (event.type === "sources") {
-              // 更新参考来源
-              botMsg.sources = event.data || [];
+              botMsg.sources = (event.data as ChatSource[]) || [];
               updateLoadingText("generating");
             } else if (event.type === "content") {
-              // 流式追加内容（打字机效果）
-              botMsg.content += event.data || "";
+              botMsg.content += (event.data as string) || "";
               scrollToBottomDebounced();
             } else if (event.type === "done") {
-              // 完成
               console.log("生成完成:", event.data);
             } else if (event.type === "error") {
-              // 业务抛出错误
-              throw new Error(event.data || "生成失败");
+              throw new Error((event.data as string) || "生成失败");
             } else if (event.type === "debug") {
-              // Debug信息
               if (debugMode.value) {
-                botMsg.debugInfo = event.data;
+                botMsg.debugInfo = event.data as DebugInfo;
               }
             }
           } catch (parseError) {
@@ -564,8 +579,9 @@ async function sendMessage() {
           break;
         }
         // 真实流读取异常
-        console.error("流读取异常:", streamError);
-        botMsg.content = `流式响应异常：${streamError.message}`;
+        const streamErr = streamError as Error;
+        console.error("流读取异常:", streamErr);
+        botMsg.content = `流式响应异常：${streamErr.message}`;
         botMsg.error = true;
         break;
       }
@@ -578,40 +594,41 @@ async function sendMessage() {
       // reader可能已关闭，忽略释放锁错误
     }
   } catch (error) {
-    console.error("发送消息失败:", error);
+    const err = error as Error & { name?: string };
+    console.error("发送消息失败:", err);
 
-    if (error.name === "AbortError") {
+    if (err.name === "AbortError") {
       if (!botMsg.content) {
         botMsg.content = "请求已中断";
         botMsg.error = true;
       }
-    } else if (error.message.includes("未登录")) {
+    } else if (err.message.includes("未登录")) {
       botMsg.content = "请先登录后再进行问答";
       botMsg.error = true;
       ElMessage.warning("请先登录");
-    } else if (error.message.includes("过期")) {
+    } else if (err.message.includes("过期")) {
       botMsg.content = "登录已过期，请重新登录";
       botMsg.error = true;
     } else if (
-      error.message.includes("网络") ||
-      error.message.includes("ECONNREFUSED")
+      err.message.includes("网络") ||
+      err.message.includes("ECONNREFUSED")
     ) {
       botMsg.content = "网络连接失败，请检查网络状态";
       botMsg.error = true;
       ElMessage.error("网络异常");
-    } else if (error.message.includes("Ollama")) {
+    } else if (err.message.includes("Ollama")) {
       botMsg.content = "AI服务暂时不可用，请检查Ollama服务是否已启动";
       botMsg.error = true;
       ElMessage.error("AI服务不可用");
-    } else if (error.message.includes("ECONNREFUSED")) {
+    } else if (err.message.includes("ECONNREFUSED")) {
       botMsg.content =
         "无法连接到AI服务，请确认Ollama已启动并运行在 http://127.0.0.1:11434";
       botMsg.error = true;
       ElMessage.error("AI服务连接失败");
     } else {
-      botMsg.content = `抱歉，发生了错误：${error.message}`;
+      botMsg.content = `抱歉，发生了错误：${err.message}`;
       botMsg.error = true;
-      ElMessage.error(error.message);
+      ElMessage.error(err.message);
     }
   } finally {
     // 状态兜底：无论成功、失败、中断，统一重置loading状态
@@ -639,7 +656,7 @@ async function sendMessage() {
 /**
  * 停止生成（手动中断请求）
  */
-function stopGeneration() {
+function stopGeneration(): void {
   if (abortController && isStreaming.value) {
     abortController.abort();
     ElMessage.info("已停止生成");
@@ -650,7 +667,7 @@ function stopGeneration() {
  * scrollToBottom防抖版本（100ms）
  * 避免流式输出高频滚动造成页面卡顿
  */
-function scrollToBottomDebounced() {
+function scrollToBottomDebounced(): void {
   if (scrollDebounceId) {
     clearTimeout(scrollDebounceId);
   }
@@ -668,7 +685,7 @@ function scrollToBottomDebounced() {
 /**
  * 原scrollToBottom保留，用于非流式场景
  */
-function scrollToBottom() {
+function scrollToBottom(): void {
   nextTick(() => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
@@ -676,12 +693,12 @@ function scrollToBottom() {
   });
 }
 
-function sendQuickQuestion(q) {
+function sendQuickQuestion(q: string): void {
   question.value = q;
   sendMessage();
 }
 
-function clearChat() {
+function clearChat(): void {
   ElMessageBox.confirm("确定要清空对话吗？", "确认清空", { type: "warning" })
     .then(() => {
       chatStore.clearMessages();
@@ -690,7 +707,7 @@ function clearChat() {
     .catch(() => {});
 }
 
-function loadHistory(history) {
+function loadHistory(history: ChatHistory): void {
   chatStore.setSelectedDocument(history.documentId);
   selectedDocumentId.value = history.documentId;
 

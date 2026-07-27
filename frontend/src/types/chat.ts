@@ -49,13 +49,23 @@ export interface RetrievalTestRequest {
   topK?: number;
 }
 
+export interface DebugInfo {
+  retrieveTime?: number;
+  generateTime?: number;
+  totalTime?: number;
+  model?: string;
+  provider?: string;
+  prompt?: string;
+}
+
 export interface ChatMessage {
   id: number;
   type: "user" | "bot";
   content: string;
   sources?: ChatSource[];
-  timestamp: Date;
+  timestamp: string;
   error?: boolean;
+  debugInfo?: DebugInfo;
 }
 
 export interface ChatHistory {
@@ -63,6 +73,6 @@ export interface ChatHistory {
   messages: Array<{
     question: string;
     answer: string;
-    timestamp: Date;
+    timestamp: string;
   }>;
 }

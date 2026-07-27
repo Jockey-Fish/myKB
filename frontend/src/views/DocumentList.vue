@@ -252,11 +252,12 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed } from "vue";
+<script setup lang="ts">
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useDocumentsStore } from "../stores/documents";
 import { ElMessage, ElMessageBox } from "element-plus";
+import type { Component } from "vue";
 import Layout from "../components/Layout.vue";
 import {
   Files,
@@ -265,17 +266,24 @@ import {
   Document,
   User,
 } from "@element-plus/icons-vue";
+import type { Document as DocumentType } from "../types/document";
+
+type SortField = "created_at" | "name" | "type";
+type SortOrder = "asc" | "desc";
+type FileType = "pdf" | "md" | "txt";
+type DocumentStatus = "processing" | "processed" | "uploaded" | "error";
+type TagType = "success" | "warning" | "danger" | "info";
 
 const router = useRouter();
 const documentsStore = useDocumentsStore();
 
-const searchText = ref("");
-const filterType = ref("");
-const filterStatus = ref("");
-const sortField = ref("created_at");
-const sortOrder = ref("desc");
-const showDetailModal = ref(false);
-const selectedDocument = ref(null);
+const searchText = ref<string>("");
+const filterType = ref<string>("");
+const filterStatus = ref<string>("");
+const sortField = ref<SortField>("created_at");
+const sortOrder = ref<SortOrder>("desc");
+const showDetailModal = ref<boolean>(false);
+const selectedDocument = ref<DocumentType | null>(null);
 
 const totalCount = computed(() => documentsStore.documents.length);
 const processedCount = computed(
@@ -285,7 +293,7 @@ const uploadedCount = computed(
   () => documentsStore.documents.filter((d) => d.status === "uploaded").length,
 );
 
-const filteredDocuments = computed(() => {
+const filteredDocuments = computed<DocumentType[]>(() => {
   let result = [...documentsStore.documents];
 
   if (searchText.value) {
@@ -303,11 +311,14 @@ const filteredDocuments = computed(() => {
     result = result.filter((d) => d.status === filterStatus.value);
   }
 
-  result.sort((a, b) => {
-    let aVal = a[sortField.value] || "";
-    let bVal = b[sortField.value] || "";
+  result.sort((a: DocumentType, b: DocumentType): number => {
+    let aVal: string | number = "";
+    let bVal: string | number = "";
 
-    if (sortField.value === "name") {
+    if (sortField.value === "created_at") {
+      aVal = a.created_at || "";
+      bVal = b.created_at || "";
+    } else if (sortField.value === "name") {
       aVal = a.original_name;
       bVal = b.original_name;
     } else if (sortField.value === "type") {
@@ -330,13 +341,13 @@ const filteredDocuments = computed(() => {
   return result;
 });
 
-function handleSearch() {}
+function handleSearch(): void {}
 
-function goToUpload() {
+function goToUpload(): void {
   router.push("/upload");
 }
 
-function getFileIcon(type) {
+function getFileIcon(type?: string): Component {
   switch (type?.toLowerCase()) {
     case "pdf":
       return Document;
@@ -345,7 +356,7 @@ function getFileIcon(type) {
   }
 }
 
-function getFileIconColor(type) {
+function getFileIconColor(type?: string): string {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "#e74c3c";
@@ -356,7 +367,7 @@ function getFileIconColor(type) {
   }
 }
 
-function getFileTypeTagType(type) {
+function getFileTypeTagType(type?: string): TagType {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "danger";
@@ -367,7 +378,7 @@ function getFileTypeTagType(type) {
   }
 }
 
-function getFileTypeLabel(type) {
+function getFileTypeLabel(type?: string): string {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "PDF";
@@ -378,7 +389,7 @@ function getFileTypeLabel(type) {
   }
 }
 
-function getStatusTagType(status) {
+function getStatusTagType(status?: string): TagType {
   switch (status) {
     case "processed":
       return "success";
@@ -391,7 +402,7 @@ function getStatusTagType(status) {
   }
 }
 
-function getStatusLabel(status) {
+function getStatusLabel(status?: string): string {
   switch (status) {
     case "processed":
       return "已处理";
@@ -400,30 +411,30 @@ function getStatusLabel(status) {
     case "error":
       return "处理失败";
     default:
-      return status;
+      return status || "";
   }
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp?: string): string {
   if (!timestamp) return "-";
   return new Date(timestamp).toLocaleString("zh-CN");
 }
 
-function handleRowClick(row) {
+function handleRowClick(row: DocumentType): void {
   selectedDocument.value = row;
   showDetailModal.value = true;
 }
 
-function viewDocument(row) {
+function viewDocument(row: DocumentType): void {
   router.push(`/documents/${row.id}`);
 }
 
-function chatWithDocument(row) {
+function chatWithDocument(row: DocumentType): void {
   documentsStore.selectDocument(row.id);
   router.push("/chat");
 }
 
-async function deleteDocument(row) {
+async function deleteDocument(row: DocumentType): Promise<void> {
   await ElMessageBox.confirm(
     `确定要删除文档 "${row.original_name}" 吗？`,
     "确认删除",
@@ -433,12 +444,11 @@ async function deleteDocument(row) {
   try {
     await documentsStore.removeDocument(row.id);
     ElMessage.success("删除成功");
-  } catch (error) {
+  } catch {
     ElMessage.error("删除失败");
   }
 }
 
-import { onMounted } from "vue";
 onMounted(() => {
   documentsStore.loadDocuments();
 });

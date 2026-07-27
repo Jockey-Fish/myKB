@@ -110,32 +110,43 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import { ElMessage } from "element-plus";
+import type { FormInstance, FormRules } from "element-plus";
 import { Cpu, MagicStick, ChatRound, Document } from "@element-plus/icons-vue";
+
+interface LoginFormData {
+  username: string;
+  password: string;
+  rememberMe: boolean;
+}
+
+interface ForgotFormData {
+  email: string;
+}
 
 const router = useRouter();
 const authStore = useAuthStore();
 
-const loginForm = ref(null);
-const showPassword = ref(false);
-const loading = ref(false);
-const showForgotModal = ref(false);
+const loginForm = ref<FormInstance | null>(null);
+const showPassword = ref<boolean>(false);
+const loading = ref<boolean>(false);
+const showForgotModal = ref<boolean>(false);
 
-const form = reactive({
+const form = reactive<LoginFormData>({
   username: "",
   password: "",
   rememberMe: false,
 });
 
-const forgotForm = reactive({
+const forgotForm = reactive<ForgotFormData>({
   email: "",
 });
 
-const rules = {
+const rules: FormRules = {
   username: [
     { required: true, message: "请输入用户名", trigger: "blur" },
     { min: 3, max: 20, message: "用户名长度在3-20个字符", trigger: "blur" },
@@ -146,17 +157,17 @@ const rules = {
   ],
 };
 
-const forgotRules = {
+const forgotRules: FormRules = {
   email: [
     { required: true, message: "请输入邮箱", trigger: "blur" },
     { type: "email", message: "请输入正确的邮箱格式", trigger: "blur" },
   ],
 };
 
-async function handleLogin() {
+async function handleLogin(): Promise<void> {
   if (!loginForm.value) return;
 
-  loginForm.value.validate(async (valid) => {
+  loginForm.value.validate(async (valid: boolean) => {
     if (valid) {
       loading.value = true;
 
@@ -164,7 +175,7 @@ async function handleLogin() {
         const result = await authStore.login(
           form.username,
           form.password,
-          form.rememberMe
+          form.rememberMe,
         );
 
         if (result.success) {
@@ -174,7 +185,7 @@ async function handleLogin() {
           ElMessage.error(result.message);
         }
       } catch (error) {
-        ElMessage.error(error.message || "登录失败");
+        ElMessage.error((error as Error).message || "登录失败");
       } finally {
         loading.value = false;
       }
@@ -182,11 +193,11 @@ async function handleLogin() {
   });
 }
 
-function showForgotPassword() {
+function showForgotPassword(): void {
   showForgotModal.value = true;
 }
 
-function handleForgotPassword() {
+function handleForgotPassword(): void {
   ElMessage.success("重置链接已发送至您的邮箱");
   showForgotModal.value = false;
 }

@@ -304,10 +304,11 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
+import type { Component } from "vue";
 import Layout from "../components/Layout.vue";
 import {
   Files,
@@ -332,13 +333,21 @@ import {
   getDocumentChunks,
   testRetrieval as testRetrievalApi,
 } from "../api/document";
+import type { Document as DocumentType } from "../types/document";
+import type { ChatSource, RetrievalTestRequest } from "../types/chat";
 
-// 配置 marked
+type TagType = "success" | "warning" | "danger" | "info" | "primary";
+
+interface ChunkItem {
+  id?: string | number;
+  content: string;
+  index?: number;
+  chunk_index?: number;
+}
+
+type TabName = "basic" | "preview" | "chunks" | "retrieval";
+
 marked.setOptions({
-  highlight: function (code, lang) {
-    const language = hljs.getLanguage(lang) ? lang : "plaintext";
-    return hljs.highlight(code, { language }).value;
-  },
   breaks: true,
   gfm: true,
 });
@@ -346,32 +355,27 @@ marked.setOptions({
 const router = useRouter();
 const route = useRoute();
 
-// 状态管理
-const loading = ref(false);
-const error = ref("");
-const document = ref(null);
-const activeTab = ref("basic");
+const loading = ref<boolean>(false);
+const error = ref<string>("");
+const document = ref<DocumentType | null>(null);
+const activeTab = ref<TabName>("basic");
 
-// 内容预览
-const contentLoading = ref(false);
-const contentError = ref("");
-const documentContent = ref("");
+const contentLoading = ref<boolean>(false);
+const contentError = ref<string>("");
+const documentContent = ref<string>("");
 
-// 切片预览
-const chunksLoading = ref(false);
-const chunksError = ref("");
-const chunks = ref([]);
-const chunkSearchText = ref("");
+const chunksLoading = ref<boolean>(false);
+const chunksError = ref<string>("");
+const chunks = ref<ChunkItem[]>([]);
+const chunkSearchText = ref<string>("");
 
-// 检索测试
-const retrievalQuery = ref("");
-const topK = ref(5);
-const retrievalLoading = ref(false);
-const retrievalError = ref("");
-const retrievalResults = ref([]);
+const retrievalQuery = ref<string>("");
+const topK = ref<number>(5);
+const retrievalLoading = ref<boolean>(false);
+const retrievalError = ref<string>("");
+const retrievalResults = ref<ChatSource[]>([]);
 
-// 计算属性
-const filteredChunks = computed(() => {
+const filteredChunks = computed<ChunkItem[]>(() => {
   if (!chunkSearchText.value) return chunks.value;
   const search = chunkSearchText.value.toLowerCase();
   return chunks.value.filter((chunk) =>
@@ -379,13 +383,13 @@ const filteredChunks = computed(() => {
   );
 });
 
-const renderedMarkdown = computed(() => {
+const renderedMarkdown = computed<string>(() => {
   if (!documentContent.value) return "";
-  return marked(documentContent.value);
+  const result = marked(documentContent.value);
+  return typeof result === "string" ? result : "";
 });
 
-// 监听标签页切换
-watch(activeTab, (newTab) => {
+watch(activeTab, (newTab: TabName) => {
   if (!document.value) return;
 
   switch (newTab) {
@@ -396,63 +400,61 @@ watch(activeTab, (newTab) => {
       loadChunks();
       break;
     case "retrieval":
-      // 检索测试不需要自动加载，等待用户输入
       break;
     default:
       break;
   }
 });
 
-// 方法
-async function loadDocument() {
+async function loadDocument(): Promise<void> {
   loading.value = true;
   error.value = "";
 
   try {
-    const documentId = route.params.id;
+    const documentId = Number(route.params.id);
     const response = await getDocument(documentId);
 
     if (response.success && response.data) {
-      document.value = response.data;
+      document.value = response.data as DocumentType;
     } else {
       error.value = response.message || "文档加载失败";
     }
   } catch (err) {
-    error.value = err.message || "网络请求失败";
+    error.value = (err as Error).message || "网络请求失败";
   } finally {
     loading.value = false;
   }
 }
 
-async function loadContent() {
+async function loadContent(): Promise<void> {
   contentLoading.value = true;
   contentError.value = "";
 
   try {
-    const response = await getDocumentContent(document.value.id);
+    const response = await getDocumentContent(document.value!.id);
 
     if (response.success && response.data) {
-      documentContent.value = response.data.content || response.data;
+      documentContent.value = response.data.content || String(response.data);
     } else {
       contentError.value = response.message || "内容加载失败";
     }
   } catch (err) {
-    contentError.value = err.message || "网络请求失败";
+    contentError.value = (err as Error).message || "网络请求失败";
   } finally {
     contentLoading.value = false;
   }
 }
 
-async function loadChunks() {
+async function loadChunks(): Promise<void> {
   chunksLoading.value = true;
   chunksError.value = "";
 
   try {
-    const response = await getDocumentChunks(document.value.id);
+    const response = await getDocumentChunks(document.value!.id);
 
     if (response.success && response.data) {
       const chunksData = response.data.chunks || response.data;
-      chunks.value = chunksData.map((chunk) => ({
+      chunks.value = (chunksData as unknown as ChunkItem[]).map((chunk) => ({
         ...chunk,
         chunk_index: chunk.index,
       }));
@@ -460,13 +462,13 @@ async function loadChunks() {
       chunksError.value = response.message || "切片加载失败";
     }
   } catch (err) {
-    chunksError.value = err.message || "网络请求失败";
+    chunksError.value = (err as Error).message || "网络请求失败";
   } finally {
     chunksLoading.value = false;
   }
 }
 
-async function testRetrieval() {
+async function testRetrieval(): Promise<void> {
   if (!retrievalQuery.value.trim()) {
     ElMessage.warning("请输入测试问题");
     return;
@@ -476,15 +478,15 @@ async function testRetrieval() {
   retrievalError.value = "";
 
   try {
-    const response = await testRetrievalApi({
+    const requestData: RetrievalTestRequest = {
       query: retrievalQuery.value,
       topK: topK.value,
-      document_id: document.value.id,
-    });
+      document_id: document.value!.id,
+    };
+    const response = await testRetrievalApi(requestData);
 
-    if (response.code === 200 && response.data) {
-      retrievalResults.value =
-        response.data.sources || response.data.results || [];
+    if (response.success && response.data) {
+      retrievalResults.value = response.data.sources || [];
       if (retrievalResults.value.length === 0) {
         ElMessage.info("未找到相关内容");
       }
@@ -492,20 +494,19 @@ async function testRetrieval() {
       retrievalError.value = response.message || "检索失败";
     }
   } catch (err) {
-    retrievalError.value = err.message || "网络请求失败";
+    retrievalError.value = (err as Error).message || "网络请求失败";
   } finally {
     retrievalLoading.value = false;
   }
 }
 
-function estimateTokens(text) {
-  // 简单的 token 估算：中文字符按 1 token，英文单词按 0.75 token
+function estimateTokens(text: string): number {
   const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
   const englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
   return Math.ceil(chineseChars + englishWords * 0.75);
 }
 
-function copyChunk(content) {
+function copyChunk(content: string): void {
   navigator.clipboard
     .writeText(content)
     .then(() => {
@@ -516,32 +517,31 @@ function copyChunk(content) {
     });
 }
 
-function goBack() {
+function goBack(): void {
   router.back();
 }
 
-function goToChat() {
+function goToChat(): void {
   router.push("/chat");
 }
 
-async function handleDelete() {
+async function handleDelete(): Promise<void> {
   await ElMessageBox.confirm(
-    `确定要删除文档 "${document.value.original_name}" 吗？`,
+    `确定要删除文档 "${document.value!.original_name}" 吗？`,
     "确认删除",
     { type: "warning" },
   );
 
   try {
-    await deleteDocApi(document.value.id);
+    await deleteDocApi(document.value!.id);
     ElMessage.success("删除成功");
     router.push("/documents");
-  } catch (err) {
+  } catch {
     ElMessage.error("删除失败");
   }
 }
 
-// 工具函数
-function getFileIcon(type) {
+function getFileIcon(type?: string): Component {
   switch (type?.toLowerCase()) {
     case "pdf":
       return Document;
@@ -550,7 +550,7 @@ function getFileIcon(type) {
   }
 }
 
-function getFileIconColor(type) {
+function getFileIconColor(type?: string): string {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "#e74c3c";
@@ -561,7 +561,7 @@ function getFileIconColor(type) {
   }
 }
 
-function getFileTypeTagType(type) {
+function getFileTypeTagType(type?: string): TagType {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "danger";
@@ -572,7 +572,7 @@ function getFileTypeTagType(type) {
   }
 }
 
-function getFileTypeLabel(type) {
+function getFileTypeLabel(type?: string): string {
   switch (type?.toLowerCase()) {
     case "pdf":
       return "PDF";
@@ -583,7 +583,7 @@ function getFileTypeLabel(type) {
   }
 }
 
-function getStatusTagType(status) {
+function getStatusTagType(status?: string): TagType {
   switch (status) {
     case "processed":
       return "success";
@@ -596,7 +596,7 @@ function getStatusTagType(status) {
   }
 }
 
-function getStatusLabel(status) {
+function getStatusLabel(status?: string): string {
   switch (status) {
     case "processed":
       return "已处理";
@@ -605,30 +605,29 @@ function getStatusLabel(status) {
     case "error":
       return "处理失败";
     default:
-      return status;
+      return status || "";
   }
 }
 
-function formatFileSize(bytes) {
+function formatFileSize(bytes?: number): string {
   if (!bytes) return "-";
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i];
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp?: string): string {
   if (!timestamp) return "-";
   return new Date(timestamp).toLocaleString("zh-CN");
 }
 
-function getRankTagType(index) {
+function getRankTagType(index: number): TagType {
   if (index === 0) return "danger";
   if (index === 1) return "warning";
   if (index === 2) return "success";
   return "info";
 }
 
-// 生命周期
 onMounted(() => {
   loadDocument();
 });

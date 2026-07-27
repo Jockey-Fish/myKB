@@ -28,7 +28,7 @@ export const useChatStore = defineStore("chat", () => {
       id: Date.now(),
       type: "user",
       content: question.trim(),
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     });
 
     loading.value = true;
@@ -53,7 +53,7 @@ export const useChatStore = defineStore("chat", () => {
           type: "bot",
           content: response.answer,
           sources: response.sources,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
         });
 
         if (
@@ -74,7 +74,7 @@ export const useChatStore = defineStore("chat", () => {
           history.messages.push({
             question,
             answer: response.answer,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
           });
         }
       } else {
@@ -82,7 +82,7 @@ export const useChatStore = defineStore("chat", () => {
           id: Date.now() + 1,
           type: "bot",
           content: result.message || "服务暂时不可用，请稍后重试",
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
           error: true,
         });
       }
@@ -93,7 +93,7 @@ export const useChatStore = defineStore("chat", () => {
         content:
           (error as { response?: { data?: { error?: string } } }).response?.data
             ?.error || "服务暂时不可用，请稍后重试",
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
         error: true,
       });
     } finally {

@@ -5,8 +5,10 @@ export interface Document {
   file_type: string;
   filesize: number;
   filesize_formatted: string;
-  status: "uploading" | "processing" | "processed" | "error";
+  status: "uploading" | "processing" | "processed" | "error" | "uploaded";
   created_at: string;
+  updated_at?: string;
+  file_path?: string;
   chunk_count?: number;
 }
 
@@ -69,6 +71,6 @@ export interface UploadQueueItem {
   file: File;
   name: string;
   progress: number;
-  status: "uploading" | "success" | "error";
+  status: "uploading" | "success" | "error" | "cancelled";
   error?: string;
 }
